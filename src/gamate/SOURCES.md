@@ -114,6 +114,15 @@ into the repository, build output, tests, or releases.
   logo delay, and final jump to the documented cartridge entry at `$6020`.
 - Result: both BIOS revisions accepted every representative cartridge and reached `$6020`.
   `gamateboot` provides the reproducible diagnostic without containing any copyrighted bytes.
+- The known 4-in-1 image has SHA-1 `4dd20632eb31023e18241290eca7d5a5acb1fa84` and CRC32
+  `10e81571`. The runtime uses the whole-image CRC32 plus the exact 128 KiB size to select its unique
+  mapper; ordinary cartridges continue to use size only to distinguish plain from commonly banked
+  hardware. This fingerprint came from the locally validated image, not an emulator source.
+- Post-entry validation ran 300 frames for Bomb Blaster under both BIOS revisions and representative
+  64, 128, 256, and 512 KiB cartridges plus the 4-in-1. The diagnostic observed changing framebuffer
+  hashes, nonblank output, IRQ service, LCD/VRAM traffic, and expected bank changes, with no unknown
+  opcodes or persistent self-loop traps. Frame hashes are computed from four-shade pixel indices and
+  contain no ROM or BIOS data.
 
 ## Still needed
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Magnominus
+/* Copyright (c) 2026 Ry
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "gamate/gamate.h"
@@ -34,9 +34,11 @@ static void testMemory(void) {
 	assert(gamateRead(&g, 0xA000) == 0);
 	gamateWrite(&g, 0xC000, 3);
 	assert(gamateRead(&g, 0xA000) == 3);
+	assert(g.diagnostics.bankWrites == 1);
 	gamateSetMapper(&g, GAMATE_MAPPER_4IN1);
 	gamateWrite(&g, 0x8000, 2);
 	assert(gamateRead(&g, 0x6000) == 2);
+	assert(g.diagnostics.bankWrites == 2);
 
 	assert(gamateRead(&g, 0x4100) == 0x41); // write-only PSG: open bus
 	assert(gamateRead(&g, 0x5800) == 0x58);

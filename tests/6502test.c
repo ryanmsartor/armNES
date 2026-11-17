@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Magnominus
+/* Copyright (c) 2026 Ry
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "gamate/gamate.h"

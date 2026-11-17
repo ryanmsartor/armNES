@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Magnominus
+/* Copyright (c) 2026 Ry
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef ARMNES_GAMATE_H
@@ -18,6 +18,13 @@ struct GamateCpu {
 	uint8_t a, x, y, s, p;
 	uint64_t cycles;
 	bool stopped;
+};
+
+struct GamateDiagnostics {
+	uint64_t instructions, unsupportedOpcodes, irqsTaken;
+	uint64_t lcdWrites, vramWrites, bankWrites;
+	uint16_t lastUnsupportedPc;
+	uint8_t lastUnsupportedOpcode;
 };
 
 struct Gamate {
@@ -45,6 +52,8 @@ struct Gamate {
 	uint8_t ayRegisters[16];
 
 	uint16_t frameBuffer[GAMATE_WIDTH * GAMATE_HEIGHT];
+	// Observational counters for bring-up tools; deliberately excluded from save states.
+	struct GamateDiagnostics diagnostics;
 };
 
 void gamateInit(struct Gamate* gamate);

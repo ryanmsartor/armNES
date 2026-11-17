@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Magnominus
+/* Copyright (c) 2026 Ry
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "gamate.h"
@@ -9,6 +9,15 @@
 // The LCD receives 72,900 clocks per frame from the 4.433 MHz master oscillator.
 enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768 };
 enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 1 };
+
+static uint32_t crc32(const uint8_t* data, size_t size) {
+	uint32_t crc = 0xFFFFFFFF;
+	while (size--) {
+		crc ^= *data++;
+		for (int bit = 0; bit < 8; bit++) crc = crc >> 1 ^ (0xEDB88320U & -(crc & 1));
+	}
+	return ~crc;
+}
 
 struct GamateState {
 	uint32_t magic, version, size, romSize;
@@ -43,7 +52,10 @@ bool gamateLoad(struct Gamate* g, const uint8_t* rom, size_t romSize,
 	g->rom = copy;
 	g->romSize = romSize;
 	memcpy(g->bios, bios, GAMATE_BIOS_SIZE);
-	g->mapper = romSize >= 0x10000 ? GAMATE_MAPPER_BANKED : GAMATE_MAPPER_PLAIN;
+	// The only known 4-in-1 has the same size as ordinary banked games, so size cannot identify it.
+	// Use its full-image fingerprint; unknown large cartridges retain the common banked mapper.
+	g->mapper = romSize == 0x20000 && crc32(rom, romSize) == 0x10E81571 ? GAMATE_MAPPER_4IN1 :
+		romSize >= 0x10000 ? GAMATE_MAPPER_BANKED : GAMATE_MAPPER_PLAIN;
 	gamateReset(g);
 	return true;
 }
@@ -90,6 +102,7 @@ void gamateReset(struct Gamate* g) {
 	g->openBus = 0xFF;
 	g->ayAddress = 0;
 	memset(g->ayRegisters, 0, sizeof(g->ayRegisters));
+	memset(&g->diagnostics, 0, sizeof(g->diagnostics));
 	gamateCpuReset(g);
 }
 
@@ -192,6 +205,7 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		return;
 	}
 	if ((address & 0xFC00) == 0x5000) {
+		g->diagnostics.lcdWrites++;
 		switch (address & 7) {
 		case 1:
 			g->displayBlank = value & 0x80;
@@ -210,6 +224,7 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		case 7: {
 			uint16_t offset = (g->vramAddress << 1) | g->vramPlane;
 			g->vram[offset] = value;
+			g->diagnostics.vramWrites++;
 			incrementVram(g);
 			break;
 		}
@@ -222,8 +237,10 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		return;
 	}
 	if (g->mapper == GAMATE_MAPPER_4IN1 && address == 0x8000) {
+		if (g->firstBank != value) g->diagnostics.bankWrites++;
 		g->firstBank = value;
 	} else if (g->mapper != GAMATE_MAPPER_PLAIN && address == 0xC000) {
+		if (g->bank != value) g->diagnostics.bankWrites++;
 		g->bank = value;
 	}
 }

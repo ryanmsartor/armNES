@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 Magnominus
+/* Copyright (c) 2026 Ry
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "gamate.h"
@@ -21,6 +21,13 @@ static uint16_t read16(struct Gamate* g, uint16_t address) {
 }
 static void push(struct Gamate* g, uint8_t value) { write8(g, 0x100 | g->cpu.s--, value); }
 static uint8_t pull(struct Gamate* g) { return read8(g, 0x100 | ++g->cpu.s); }
+
+static unsigned unsupported(struct Gamate* g, uint8_t opcode) {
+	g->diagnostics.unsupportedOpcodes++;
+	g->diagnostics.lastUnsupportedOpcode = opcode;
+	g->diagnostics.lastUnsupportedPc = g->cpu.pc - 1;
+	return 2;
+}
 
 static void flag(struct GamateCpu* c, uint8_t mask, bool set) {
 	c->p = set ? c->p | mask : c->p & ~mask;
@@ -102,6 +109,7 @@ static unsigned interrupt(struct Gamate* g, uint16_t vector, bool software) {
 	if (vector == 0xFFFE) {
 		g->irq = false;
 		g->irqClocks = 0;
+		if (!software) g->diagnostics.irqsTaken++;
 	}
 	return 7;
 }
@@ -169,7 +177,7 @@ static unsigned group2(struct Gamate* g, uint8_t opcode) {
 	else if (mode == 3) address = fetch16(g);
 	else if (mode == 5) address = (uint8_t) (fetch(g) + ((operation == 4 || operation == 5) ? c->y : c->x));
 	else if (mode == 7 && operation != 4) address = indexed(fetch16(g), operation == 5 ? c->y : c->x, &crossed);
-	else return 2;
+	else return unsupported(g, opcode);
 	if (operation == 4) { write8(g, address, c->x); return mode == 3 ? 4 : 3 + (mode == 5); }
 	if (operation == 5) {
 		c->x = read8(g, address); zn(c, c->x);
@@ -193,6 +201,7 @@ static unsigned branch(struct Gamate* g, bool take) {
 
 unsigned gamateCpuStep(struct Gamate* g) {
 	struct GamateCpu* c = &g->cpu;
+	g->diagnostics.instructions++;
 	if (c->stopped) return 1;
 	if (g->irq && !(c->p & I)) {
 		unsigned cycles = interrupt(g, 0xFFFE, false);
@@ -257,7 +266,7 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	case 0xEC: compare(c, c->x, read8(g, fetch16(g))); cycles = 4; break;
 	case 0xF0: cycles = branch(g, c->p & Z); break;
 	case 0xF8: c->p |= D; break;
-	default: break; // Unverified 65CX02/undocumented opcodes are intentionally inert for now.
+	default: cycles = unsupported(g, opcode); break;
 	}
 	c->p |= U;
 	c->cycles += cycles;
