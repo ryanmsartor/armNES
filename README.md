@@ -320,9 +320,14 @@ pixels unless a Zapper or a sprite 0 hit needs them.
 
 The test tools run a game headless. `nesrun <rom> [frames]` prints a test ROM's result, or a hash of
 the last frame; `coretest <core> <rom>` drives any libretro core and checks its save states;
-`gamatecoretest <core>` checks the Gamate frontend contract with an original synthetic BIOS and no
-copyrighted inputs; `selfdiff <rom> [frames]` runs Exact and Fast side by side and reports the first
-frame they differ.
+`gamatecoretest <core>` checks the Gamate frontend contract with original minimal test firmware and
+cartridge data, containing no commercial firmware or game bytes; `selfdiff <rom> [frames]` runs
+Exact and Fast side by side and reports the first frame they differ.
+
+`tools/gamate-sweep.sh <rom-directory>` optionally runs every local Gamate `.bin` cartridge under
+both `gamate_bios_umc.bin` and `gamate_bios_bit.bin`. Its report contains filenames, execution
+diagnostics, and video/audio hashes, never firmware or cartridge contents. The directory and images
+are user-supplied and are not copied into the repository.
 `nesrun` takes these environment variables:
 
 | Variable | Effect |

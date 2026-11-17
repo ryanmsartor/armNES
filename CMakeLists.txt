@@ -92,8 +92,8 @@ target_link_libraries(armgamate_libretro armgamate)
 set_target_properties(armgamate_libretro PROPERTIES PREFIX "")
 target_link_options(armgamate_libretro PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/shared/libretro/link.T -Wl,--no-undefined)
 
-# Self-contained frontend contract test: it generates an original tiny BIOS and cartridge in memory,
-# so it needs no distributed or user-supplied Gamate images.
+# Self-contained frontend contract test: it generates original minimal test firmware and cartridge
+# data in memory, so it needs no distributed or user-supplied Gamate images.
 add_executable(gamatecoretest tests/gamatecoretest.c)
 target_include_directories(gamatecoretest PRIVATE shared/libretro)
 target_link_libraries(gamatecoretest dl)

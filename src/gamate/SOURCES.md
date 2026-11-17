@@ -206,11 +206,29 @@ into the repository, build output, tests, or releases.
   errors. This validates the observed frontend lifecycle; it is not evidence about original-hardware
   timing accuracy.
 - `gamatecoretest` automates that frontend contract without external copyrighted data. It generates
-  an original 4 KiB test BIOS at runtime whose small 6502 program produces one AY tone, writes a
-  visible LCD pixel, and mirrors `$4400` into RAM. The harness verifies all eight active-low input
-  mappings, video and audio callbacks, the fixed state size before/after content load, serialization
-  restoration, reset, unload, and a second content load. This program is test scaffolding authored
-  for armNES; no emulator source or commercial BIOS/ROM bytes were used to create it.
+  original minimal 4 KiB test firmware at runtime whose small, purpose-written 6502 program produces
+  one AY tone, writes a visible LCD pixel, and mirrors `$4400` into RAM. The temporary file is named
+  `gamate_bios_umc.bin` solely because that is one of the core's firmware-discovery names; its
+  contents are not derived from, intended to reproduce, or usable as a replacement for the UMC
+  firmware. The harness verifies all eight active-low input mappings, video and audio callbacks, the
+  fixed state size before/after content load, serialization restoration, reset, unload, and a second
+  content load. This program is test scaffolding authored for armNES; no emulator source or
+  commercial firmware, BIOS, or game-ROM bytes were used to create it.
+- `tools/gamate-sweep.sh` ran all 58 locally supplied cartridges under both validated BIOS revisions
+  for 300 frames after `$6020`: 116/116 combinations booted and produced nonblank video with no
+  unsupported opcode or persistent self-loop diagnosis. Cartridge sizes covered 16, 32, 64, 128,
+  256, and 512 KiB, including the fingerprinted 4-in-1 mapper. The report remains outside the
+  repository at `/tmp/armgamate-sweep.txt` and contains filenames, hashes, and counters but no input
+  bytes. This is broad automated smoke coverage, not a claim that every title is playable or
+  hardware-accurate.
+- Two titles were silent during this unattended 300-frame window under both BIOSes: Further
+  Adventures of Hannibal The Cat (four AY writes) and Tornado (9,310 AY writes). Famous 7, One
+  Million Whys, and QuizFighter produced audio in only 24 frames. These are investigation targets,
+  not automatic failures, because the sweep supplies no gameplay input and silence may be correct
+  at an attract/title screen. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
+  Mini Golf and Money Maze differed. Audio hashes generally differed because the two BIOS boot
+  paths enter cartridge execution at different master-clock/sample phases. These differences are
+  retained as leads rather than treated as proof of an emulation defect.
 
 ## Still needed
 

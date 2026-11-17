@@ -58,9 +58,10 @@ static int16_t inputState(unsigned port, unsigned device, unsigned index, unsign
 	return port == 0 && device == RETRO_DEVICE_JOYPAD && index == 0 && id == activeButton;
 }
 
-static void writeTestBios(void) {
-	uint8_t bios[0x1000] = { 0 };
-	// Original test program: initialize one AY tone and a visible pixel, then mirror $4400 to RAM.
+static void writeTestFirmware(void) {
+	uint8_t firmware[0x1000] = { 0 };
+	// Purpose-written test program: initialize one AY tone and a visible pixel, then mirror $4400
+	// to RAM. The temporary discovery filename below does not imply commercial firmware contents.
 	static const uint8_t program[] = {
 		0x78,                         // SEI
 		0xD8,                         // CLD
@@ -76,13 +77,13 @@ static void writeTestBios(void) {
 		0xEE, 0x01, 0x00,             // INC $0001
 		0x4C, 0x25, 0xE0              // JMP loop
 	};
-	memcpy(bios, program, sizeof(program));
-	bios[0xFFC] = 0x00;
-	bios[0xFFD] = 0xE0;
+	memcpy(firmware, program, sizeof(program));
+	firmware[0xFFC] = 0x00;
+	firmware[0xFFD] = 0xE0;
 	char path[sizeof(systemDirectory) + 24];
 	snprintf(path, sizeof(path), "%s/gamate_bios_umc.bin", systemDirectory);
 	FILE* file = fopen(path, "wb");
-	assert(file && fwrite(bios, 1, sizeof(bios), file) == sizeof(bios));
+	assert(file && fwrite(firmware, 1, sizeof(firmware), file) == sizeof(firmware));
 	assert(fclose(file) == 0);
 }
 
@@ -90,7 +91,7 @@ static void writeTestBios(void) {
 
 int main(int argc, char** argv) {
 	assert(argc == 2 && mkdtemp(systemDirectory));
-	writeTestBios();
+	writeTestFirmware();
 	void* core = dlopen(argv[1], RTLD_NOW);
 	assert(core);
 
@@ -138,7 +139,7 @@ int main(int argc, char** argv) {
 	assert(stateSizeBeforeLoad > 0);
 
 	uint8_t rom[0x8000] = { 0 };
-	struct retro_game_info game = { "synthetic.gam", rom, sizeof(rom), NULL };
+	struct retro_game_info game = { "test-cartridge.gam", rom, sizeof(rom), NULL };
 	assert(p_retro_load_game(&game));
 	assert(p_retro_serialize_size() == stateSizeBeforeLoad);
 	uint8_t* ram = p_retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
@@ -180,9 +181,9 @@ int main(int argc, char** argv) {
 	p_retro_deinit();
 	dlclose(core);
 
-	char biosPath[sizeof(systemDirectory) + 24];
-	snprintf(biosPath, sizeof(biosPath), "%s/gamate_bios_umc.bin", systemDirectory);
-	assert(unlink(biosPath) == 0 && rmdir(systemDirectory) == 0);
+	char firmwarePath[sizeof(systemDirectory) + 24];
+	snprintf(firmwarePath, sizeof(firmwarePath), "%s/gamate_bios_umc.bin", systemDirectory);
+	assert(unlink(firmwarePath) == 0 && rmdir(systemDirectory) == 0);
 	puts("Gamate libretro integration test passed");
 	return 0;
 }
