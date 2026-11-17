@@ -94,9 +94,26 @@ hardware measurements take precedence where they conflict with an emulator.
 
 - URL: <https://github.com/Klaus2m5/6502_65C02_functional_tests>
 - License: tests repository license applies to the external test programs; no test ROM is bundled.
-- Intended use: external conformance validation of all official opcodes, addressing modes, flags,
-  branches, stack operations, and decimal arithmetic. The current Gamate-focused smoke tests run in
-  `gamatetest`; a flat 64 KiB conformance adapter is still to be added before claiming full passage.
+- Used for: external conformance validation of all official opcodes, addressing modes, flags,
+  branches, stack operations, and valid-BCD decimal arithmetic. `gamate-6502test` links the
+  production `cpu.c` to a separate flat 64 KiB bus and runs the repository's unmodified
+  `6502_functional_test.bin` (SHA-1 `55c9ab5b137c8ced3c666bfdb55c8285782baad9`). The image is
+  downloaded to `/tmp` for testing and is not distributed by this project.
+- Result: passed at the documented `$3469` success trap after 30,646,193 instructions. The first run
+  failed in decimal `SBC`; that result led to correcting the nibble borrow/adjust implementation.
+
+## Local compatibility validation (files not distributed)
+
+The following user-supplied files were read in place solely for boot validation. They are not copied
+into the repository, build output, tests, or releases.
+
+- UMC/NCR BIOS, SHA-1 `ea449dc607601f9a68d855ad6ab53800d2e99297`.
+- BIT BIOS, SHA-1 `4e9dfbfe916ca485530ef4221593ab68738e2217`.
+- Representative cartridges at 32, 64, 128, 256, and 512 KiB, plus the 128 KiB 4-in-1 cartridge.
+  These were used to exercise the BIOS protection handshake, header text and checksum validation,
+  logo delay, and final jump to the documented cartridge entry at `$6020`.
+- Result: both BIOS revisions accepted every representative cartridge and reached `$6020`.
+  `gamateboot` provides the reproducible diagnostic without containing any copyrighted bytes.
 
 ## Still needed
 

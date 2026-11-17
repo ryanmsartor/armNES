@@ -66,10 +66,14 @@ static void sbc(struct GamateCpu* c, uint8_t value) {
 	zn(c, binary);
 	flag(c, C, binary < 0x100);
 	if (c->p & D) {
-		int adjusted = c->a - value - borrow;
-		if ((int) (c->a & 0x0F) - borrow < (int) (value & 0x0F)) adjusted -= 6;
-		if (adjusted < 0) adjusted -= 0x60;
-		c->a = adjusted;
+		int low = (c->a & 0x0F) - (value & 0x0F) - (int) borrow;
+		int high = (c->a >> 4) - (value >> 4);
+		if (low < 0) {
+			low -= 6;
+			high--;
+		}
+		if (high < 0) high -= 6;
+		c->a = (high << 4) | (low & 0x0F);
 	} else {
 		c->a = binary;
 	}

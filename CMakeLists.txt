@@ -75,6 +75,14 @@ target_link_libraries(gamatetest armgamate)
 # Assertions are the test runner; Release is the default build type for the emulator itself.
 target_compile_options(gamatetest PRIVATE -UNDEBUG)
 
+# Flat-memory runner for Klaus Dormann's external 6502 test image. The image is intentionally not
+# distributed; pass its path to this executable after downloading it from the documented source.
+add_executable(gamate-6502test tests/6502test.c src/gamate/cpu.c)
+target_include_directories(gamate-6502test PRIVATE src)
+
+add_executable(gamateboot tests/gamateboot.c)
+target_link_libraries(gamateboot armgamate)
+
 add_library(armgamate_libretro SHARED libretro/gamate.c)
 target_include_directories(armgamate_libretro PRIVATE shared/libretro)
 target_link_libraries(armgamate_libretro armgamate)
