@@ -37,6 +37,18 @@ void retro_init(void) {
 	static const struct retro_controller_description ports[] = { { "Gamate", RETRO_DEVICE_JOYPAD } };
 	static const struct retro_controller_info controllers[] = { { ports, 1 }, { NULL, 0 } };
 	environCb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*) controllers);
+	static const struct retro_input_descriptor inputs[] = {
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "Up" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "Down" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "Left" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "A" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "B" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" },
+		{ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select" },
+		{ 0 }
+	};
+	environCb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, (void*) inputs);
 }
 
 void retro_deinit(void) { gamateFree(&gamate); }

@@ -167,6 +167,16 @@ into the repository, build output, tests, or releases.
   from the former frame-end snapshot, as expected; the settled frame-300 hash remained `e324a485`.
   No local MAME executable or hardware capture was available for pixel-by-pixel external comparison,
   so those hashes are regression baselines rather than claims of independent visual equivalence.
+- An interactive RetroArch run of Bomb Blaster confirmed correct panel orientation, working audio,
+  Start, and all four directions. The initial isolated frontend configuration did not produce an
+  observable response from its implicit X/Z face-button bindings. Kevtris's physical controller
+  readout was rechecked to distinguish frontend configuration from emulated wiring: `$4400` bits 4
+  and 5 are active-low A and B, matching the core; xrip independently uses the same bit order. A
+  temporary live trace then confirmed both A and B press/release transitions reached those exact
+  bits, and Bomb Blaster began accepting bomb input. The trace was removed after diagnosis. The
+  libretro core polls once immediately before each emulated frame (at 60.8093 Hz), bounding its own
+  input-sampling delay to one frame; remaining perceived sluggishness has not yet been separated
+  from Bomb Blaster's game logic or display behavior.
 
 ## Still needed
 
