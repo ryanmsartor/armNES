@@ -64,6 +64,17 @@ target_link_libraries(nesrun armnes m)
 add_executable(selfdiff tests/selfdiff.c)
 target_link_libraries(selfdiff armnes)
 
+# The Gamate backend is kept separate from the NES machine while it is brought up.  Its headless
+# tests cover the hardware boundary before it is connected to a CPU and frontend target.
+add_library(armgamate STATIC src/gamate/gamate.c)
+target_include_directories(armgamate PUBLIC src)
+target_compile_options(armgamate PRIVATE -O3)
+
+add_executable(gamatetest tests/gamatetest.c)
+target_link_libraries(gamatetest armgamate)
+# Assertions are the test runner; Release is the default build type for the emulator itself.
+target_compile_options(gamatetest PRIVATE -UNDEBUG)
+
 # The libretro core, with the Armulators pieces it uses (libretro.h, core options) copied into shared/
 # (tools/check-shared.sh compares them with the submodule)
 add_library(armnes-shared STATIC shared/libretro/options.c)

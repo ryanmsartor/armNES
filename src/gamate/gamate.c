@@ -1,0 +1,361 @@
+/* Copyright (c) 2026 Magnominus
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+#include "gamate.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+// The LCD receives 72,900 clocks per frame from the 4.433 MHz master oscillator.
+enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768, IRQ_PULSE = 20 };
+enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 1 };
+
+struct GamateState {
+	uint32_t magic, version, size, romSize;
+	uint8_t ram[0x400];
+	uint8_t vram[0x4000];
+	uint16_t vramAddress;
+	uint8_t scrollX, scrollY, bank, firstBank, mapper;
+	uint8_t flags;
+	uint8_t protectionFlags, protectionPosition, protectionByte, protectionSequence;
+	uint8_t buttons, openBus;
+	uint64_t masterClocks;
+	uint32_t frameClocks;
+	uint8_t ayAddress, ayRegisters[16];
+};
+
+void gamateInit(struct Gamate* g) {
+	memset(g, 0, sizeof(*g));
+}
+
+bool gamateLoad(struct Gamate* g, const uint8_t* rom, size_t romSize,
+		const uint8_t* bios, size_t biosSize) {
+	if (!rom || !romSize || romSize > GAMATE_MAX_ROM_SIZE || !bios || biosSize != GAMATE_BIOS_SIZE) {
+		return false;
+	}
+	uint8_t* copy = malloc(romSize);
+	if (!copy) {
+		return false;
+	}
+	memcpy(copy, rom, romSize);
+	free(g->rom);
+	g->rom = copy;
+	g->romSize = romSize;
+	memcpy(g->bios, bios, GAMATE_BIOS_SIZE);
+	g->mapper = romSize >= 0x10000 ? GAMATE_MAPPER_BANKED : GAMATE_MAPPER_PLAIN;
+	gamateReset(g);
+	return true;
+}
+
+void gamateSetMapper(struct Gamate* g, enum GamateMapper mapper) {
+	if (mapper >= GAMATE_MAPPER_PLAIN && mapper <= GAMATE_MAPPER_4IN1) {
+		g->mapper = mapper;
+		g->bank = g->firstBank = 0;
+	}
+}
+
+void gamateFree(struct Gamate* g) {
+	free(g->rom);
+	g->rom = NULL;
+	g->romSize = 0;
+}
+
+void gamateReset(struct Gamate* g) {
+	memset(g->ram, 0xFF, sizeof(g->ram));
+	memset(g->vram, 0, sizeof(g->vram));
+	g->vramAddress = 0;
+	g->scrollX = 0;
+	g->scrollY = 10;
+	g->bank = 0;
+	g->firstBank = 0;
+	g->vramPlane = false;
+	g->incrementRow = false;
+	g->window = false;
+	g->swapPlanes = false;
+	g->displayBlank = false;
+	g->displayStopped = false;
+	g->protectionPassed = false;
+	g->protectionFailed = false;
+	g->protectionReply = false;
+	g->protectionPosition = 0;
+	g->protectionByte = 0;
+	g->protectionSequence = 0;
+	g->masterClocks = 0;
+	g->frameClocks = 0;
+	g->frameDone = false;
+	g->irq = false;
+	g->buttons = 0xFF; // all controls are active low
+	g->openBus = 0xFF;
+	g->ayAddress = 0;
+	memset(g->ayRegisters, 0, sizeof(g->ayRegisters));
+}
+
+static size_t romOffset(const struct Gamate* g, uint16_t address) {
+	size_t offset = address - 0x6000;
+	if (g->mapper == GAMATE_MAPPER_4IN1 && offset < 0x4000) {
+		offset = (size_t) g->firstBank * 0x4000 + offset;
+	} else if (g->mapper != GAMATE_MAPPER_PLAIN && offset >= 0x4000) {
+		offset = (size_t) g->bank * 0x4000 + (offset & 0x3FFF);
+	}
+	return g->romSize ? offset % g->romSize : 0;
+}
+
+static void incrementVram(struct Gamate* g) {
+	g->vramAddress = (g->vramAddress + (g->incrementRow ? 0x20 : 1)) & 0x1FFF;
+}
+
+static void protectionWrite(struct Gamate* g, bool bit) {
+	static const uint8_t key[] = "BIT CORPORATION";
+	if (g->protectionPosition < 8) {
+		g->protectionByte |= bit << (7 - g->protectionPosition++);
+		return;
+	}
+	if (!g->protectionFailed && g->protectionSequence < sizeof(key) - 1 &&
+			g->protectionByte != key[g->protectionSequence]) {
+		g->protectionFailed = true;
+	}
+	g->protectionPosition = 0;
+	g->protectionByte = 0;
+	if (++g->protectionSequence == sizeof(key) - 1 && !g->protectionFailed) {
+		g->protectionByte = 0x47;
+		g->protectionReply = true;
+	}
+}
+
+static uint8_t protectionRead(struct Gamate* g) {
+	if (!g->protectionReply) {
+		return 0;
+	}
+	uint8_t bit = (g->protectionByte >> (7 - g->protectionPosition++)) & 1;
+	if (g->protectionPosition == 8) {
+		g->protectionPassed = true;
+		g->protectionPosition = 0;
+		g->protectionByte = 0;
+	}
+	return bit;
+}
+
+uint8_t gamateRead(struct Gamate* g, uint16_t address) {
+	uint8_t value;
+	if (address < 0x2000) {
+		value = g->ram[address & 0x3FF];
+		goto done;
+	}
+	if ((address & 0xFC00) == 0x4000) {
+		// The PSG is write-only. Undriven reads expose the high address byte.
+		value = address >> 8;
+		goto done;
+	}
+	if ((address & 0xFC00) == 0x4400) {
+		value = g->buttons;
+		goto done;
+	}
+	if ((address & 0xFC00) == 0x4800) {
+		value = 0; // UART receive data; link emulation is not connected yet
+		goto done;
+	}
+	if ((address & 0xFC00) == 0x5000 && (address & 7) == 6) {
+		uint16_t offset = (g->vramAddress << 1) | g->vramPlane;
+		value = g->vram[offset];
+		incrementVram(g);
+		goto done;
+	}
+	if ((address & 0xFF00) == 0x5A00) {
+		value = (address >> 8) | 3;
+		goto done;
+	}
+	if (address >= 0x6000 && address < 0xE000) {
+		value = g->protectionPassed && g->rom ? g->rom[romOffset(g, address)] : protectionRead(g) << 1;
+		goto done;
+	}
+	if (address >= 0xE000) {
+		value = g->bios[address & 0x0FFF];
+		goto done;
+	}
+	value = address >= 0x5400 && address < 0x5800 ? 0xFF : address >> 8;
+done:
+	g->openBus = value;
+	return value;
+}
+
+void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
+	if (address < 0x2000) {
+		g->ram[address & 0x3FF] = value;
+		return;
+	}
+	if ((address & 0xFC00) == 0x4000) {
+		g->ayAddress = address & 0x0F;
+		g->ayRegisters[g->ayAddress] = value;
+		return;
+	}
+	if ((address & 0xFC00) == 0x5000) {
+		switch (address & 7) {
+		case 1:
+			g->displayBlank = value & 0x80;
+			g->incrementRow = value & 0x40;
+			g->window = value & 0x20;
+			g->swapPlanes = value & 0x10;
+			g->displayStopped = value & 0x01;
+			break;
+		case 2: g->scrollX = value; break;
+		case 3: g->scrollY = value; break;
+		case 4:
+			g->vramPlane = value & 0x80;
+			g->vramAddress = (g->vramAddress & 0x3FE0) | (value & 0x1F);
+			break;
+		case 5: g->vramAddress = (g->vramAddress & 0x001F) | ((uint16_t) value << 5); break;
+		case 7: {
+			uint16_t offset = (g->vramAddress << 1) | g->vramPlane;
+			g->vram[offset] = value;
+			incrementVram(g);
+			break;
+		}
+		default: break;
+		}
+		return;
+	}
+	if (address >= 0x6000 && address < 0xE000 && !g->protectionPassed) {
+		protectionWrite(g, (value & 4) != 0);
+		return;
+	}
+	if (g->mapper == GAMATE_MAPPER_4IN1 && address == 0x8000) {
+		g->firstBank = value;
+	} else if (g->mapper != GAMATE_MAPPER_PLAIN && address == 0xC000) {
+		g->bank = value;
+	}
+}
+
+static void displayPosition(const struct Gamate* g, int line, int* x, int* y) {
+	if (g->scrollY < 0xC8) {
+		*y = line + g->scrollY;
+		if (*y >= 0xC8) {
+			*y -= 0xC8;
+		}
+		*x = g->scrollX;
+		if (g->window && line < 0x10) {
+			*x = 0;
+			*y = 0xD0 + line;
+		}
+		return;
+	}
+	*x = g->scrollX;
+	if (g->scrollY & 8) {
+		*y = 0;
+		return;
+	}
+	int fixed = g->scrollY & 7;
+	if (line <= fixed) {
+		*x = 0;
+		*y = 0xF8 + line + 7 - fixed;
+	} else {
+		*y = line;
+	}
+}
+
+void gamateRender(struct Gamate* g) {
+	if (g->displayStopped) {
+		return;
+	}
+	for (int y = 0; y < GAMATE_HEIGHT; y++) {
+		int sx, sy;
+		displayPosition(g, y, &sx, &sy);
+		for (int x = 0; x < GAMATE_WIDTH; x++) {
+			int px = (x + sx) & 0xFF;
+			int offset = (((sy & 0xFF) * 0x20) + (px >> 3)) << 1;
+			int shift = 7 - (px & 7);
+			int a = (g->vram[offset] >> shift) & 1;
+			int b = (g->vram[offset + 1] >> shift) & 1;
+			int pixel = g->swapPlanes ? b | (a << 1) : a | (b << 1);
+			g->frameBuffer[y * GAMATE_WIDTH + x] = g->displayBlank ? 0 : (uint16_t) pixel;
+		}
+	}
+}
+
+void gamateRunClocks(struct Gamate* g, unsigned clocks) {
+	for (unsigned i = 0; i < clocks; i++) {
+		uint64_t phase = g->masterClocks % IRQ_PERIOD;
+		// Approximate the measured timer as a short level at the end of each interval. CPU vector
+		// fetch acknowledgement will replace this approximation when the CPU is connected.
+		g->irq = phase >= IRQ_PERIOD - IRQ_PULSE;
+		g->masterClocks++;
+		if (++g->frameClocks == CLOCKS_PER_FRAME) {
+			g->frameClocks = 0;
+			g->frameDone = true;
+		}
+	}
+}
+
+void gamateRunFrame(struct Gamate* g) {
+	g->frameDone = false;
+	gamateRunClocks(g, CLOCKS_PER_FRAME - g->frameClocks);
+	gamateRender(g);
+}
+
+size_t gamateStateSize(const struct Gamate* g) {
+	(void) g;
+	return sizeof(struct GamateState);
+}
+
+bool gamateSaveState(const struct Gamate* g, void* data, size_t size) {
+	if (!data || size < sizeof(struct GamateState)) {
+		return false;
+	}
+	struct GamateState state = {
+		.magic = STATE_MAGIC, .version = STATE_VERSION, .size = sizeof(state), .romSize = (uint32_t) g->romSize,
+		.vramAddress = g->vramAddress, .scrollX = g->scrollX, .scrollY = g->scrollY,
+		.bank = g->bank, .firstBank = g->firstBank, .mapper = g->mapper,
+		.flags = g->vramPlane | g->incrementRow << 1 | g->window << 2 | g->swapPlanes << 3 |
+			g->displayBlank << 4 | g->displayStopped << 5 | g->irq << 6,
+		.protectionFlags = g->protectionPassed | g->protectionFailed << 1 | g->protectionReply << 2,
+		.protectionPosition = g->protectionPosition, .protectionByte = g->protectionByte,
+		.protectionSequence = g->protectionSequence,
+		.buttons = g->buttons, .openBus = g->openBus,
+		.masterClocks = g->masterClocks, .frameClocks = g->frameClocks,
+		.ayAddress = g->ayAddress,
+	};
+	memcpy(state.ram, g->ram, sizeof(state.ram));
+	memcpy(state.vram, g->vram, sizeof(state.vram));
+	memcpy(state.ayRegisters, g->ayRegisters, sizeof(state.ayRegisters));
+	memcpy(data, &state, sizeof(state));
+	return true;
+}
+
+bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
+	if (!data || size < sizeof(struct GamateState)) {
+		return false;
+	}
+	struct GamateState state;
+	memcpy(&state, data, sizeof(state));
+	if (state.magic != STATE_MAGIC || state.version != STATE_VERSION || state.size != sizeof(state) ||
+			state.romSize != g->romSize) {
+		return false;
+	}
+	memcpy(g->ram, state.ram, sizeof(g->ram));
+	memcpy(g->vram, state.vram, sizeof(g->vram));
+	g->vramAddress = state.vramAddress;
+	g->scrollX = state.scrollX;
+	g->scrollY = state.scrollY;
+	g->bank = state.bank;
+	g->firstBank = state.firstBank;
+	g->mapper = state.mapper <= GAMATE_MAPPER_4IN1 ? state.mapper : GAMATE_MAPPER_PLAIN;
+	g->vramPlane = state.flags & 1;
+	g->incrementRow = state.flags & 2;
+	g->window = state.flags & 4;
+	g->swapPlanes = state.flags & 8;
+	g->displayBlank = state.flags & 16;
+	g->displayStopped = state.flags & 32;
+	g->irq = state.flags & 64;
+	g->protectionPassed = state.protectionFlags & 1;
+	g->protectionFailed = state.protectionFlags & 2;
+	g->protectionReply = state.protectionFlags & 4;
+	g->protectionPosition = state.protectionPosition;
+	g->protectionByte = state.protectionByte;
+	g->protectionSequence = state.protectionSequence;
+	g->buttons = state.buttons;
+	g->openBus = state.openBus;
+	g->masterClocks = state.masterClocks;
+	g->frameClocks = state.frameClocks;
+	g->ayAddress = state.ayAddress;
+	memcpy(g->ayRegisters, state.ayRegisters, sizeof(g->ayRegisters));
+	return true;
+}
