@@ -7,7 +7,7 @@
 #include <string.h>
 
 // The LCD receives 72,900 clocks per frame from the 4.433 MHz master oscillator.
-enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768, IRQ_PULSE = 20 };
+enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768 };
 enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 1 };
 
 struct GamateState {
@@ -20,8 +20,9 @@ struct GamateState {
 	uint8_t protectionFlags, protectionPosition, protectionByte, protectionSequence;
 	uint8_t buttons, openBus;
 	uint64_t masterClocks;
-	uint32_t frameClocks;
+	uint32_t frameClocks, irqClocks;
 	uint8_t ayAddress, ayRegisters[16];
+	struct GamateCpu cpu;
 };
 
 void gamateInit(struct Gamate* g) {
@@ -82,12 +83,14 @@ void gamateReset(struct Gamate* g) {
 	g->protectionSequence = 0;
 	g->masterClocks = 0;
 	g->frameClocks = 0;
+	g->irqClocks = 0;
 	g->frameDone = false;
 	g->irq = false;
 	g->buttons = 0xFF; // all controls are active low
 	g->openBus = 0xFF;
 	g->ayAddress = 0;
 	memset(g->ayRegisters, 0, sizeof(g->ayRegisters));
+	gamateCpuReset(g);
 }
 
 static size_t romOffset(const struct Gamate* g, uint16_t address) {
@@ -273,11 +276,10 @@ void gamateRender(struct Gamate* g) {
 
 void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 	for (unsigned i = 0; i < clocks; i++) {
-		uint64_t phase = g->masterClocks % IRQ_PERIOD;
-		// Approximate the measured timer as a short level at the end of each interval. CPU vector
-		// fetch acknowledgement will replace this approximation when the CPU is connected.
-		g->irq = phase >= IRQ_PERIOD - IRQ_PULSE;
 		g->masterClocks++;
+		if (++g->irqClocks == IRQ_PERIOD) {
+			g->irq = true;
+		}
 		if (++g->frameClocks == CLOCKS_PER_FRAME) {
 			g->frameClocks = 0;
 			g->frameDone = true;
@@ -287,7 +289,9 @@ void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 
 void gamateRunFrame(struct Gamate* g) {
 	g->frameDone = false;
-	gamateRunClocks(g, CLOCKS_PER_FRAME - g->frameClocks);
+	while (!g->frameDone) {
+		gamateRunClocks(g, gamateCpuStep(g) * 2);
+	}
 	gamateRender(g);
 }
 
@@ -310,8 +314,9 @@ bool gamateSaveState(const struct Gamate* g, void* data, size_t size) {
 		.protectionPosition = g->protectionPosition, .protectionByte = g->protectionByte,
 		.protectionSequence = g->protectionSequence,
 		.buttons = g->buttons, .openBus = g->openBus,
-		.masterClocks = g->masterClocks, .frameClocks = g->frameClocks,
+		.masterClocks = g->masterClocks, .frameClocks = g->frameClocks, .irqClocks = g->irqClocks,
 		.ayAddress = g->ayAddress,
+		.cpu = g->cpu,
 	};
 	memcpy(state.ram, g->ram, sizeof(state.ram));
 	memcpy(state.vram, g->vram, sizeof(state.vram));
@@ -355,7 +360,9 @@ bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
 	g->openBus = state.openBus;
 	g->masterClocks = state.masterClocks;
 	g->frameClocks = state.frameClocks;
+	g->irqClocks = state.irqClocks;
 	g->ayAddress = state.ayAddress;
+	g->cpu = state.cpu;
 	memcpy(g->ayRegisters, state.ayRegisters, sizeof(g->ayRegisters));
 	return true;
 }

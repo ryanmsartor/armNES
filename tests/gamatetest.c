@@ -71,13 +71,14 @@ static void testTimingAndState(void) {
 	gamateInit(&g);
 	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
 	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
-	gamateRunClocks(&g, 32768 - 20);
+	gamateRunClocks(&g, 32767);
 	assert(!g.irq);
 	gamateRunClocks(&g, 1);
 	assert(g.irq);
 	gamateReset(&g);
 	gamateRunFrame(&g);
-	assert(g.frameDone && g.frameClocks == 0 && g.masterClocks == 72900);
+	assert(g.frameDone && g.masterClocks >= 72900);
+	assert(g.frameClocks == g.masterClocks - 72900); // preserve an instruction crossing the frame edge
 	g.ram[7] = 0x5A;
 	size_t size = gamateStateSize(&g);
 	void* state = malloc(size);
@@ -89,9 +90,39 @@ static void testTimingAndState(void) {
 	gamateFree(&g);
 }
 
+static void testCpu(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	uint8_t program[] = {
+		0xA9, 0x45,       // LDA #$45
+		0xF8,             // SED
+		0x18,             // CLC
+		0x69, 0x55,       // ADC #$55 -> $00 with carry in BCD
+		0xD8,             // CLD
+		0xA2, 0x03,       // LDX #3
+		0xCA,             // DEX
+		0xD0, 0xFD,       // BNE $E009
+		0x20, 0x10, 0xE0, // JSR $E010
+		0xEA,             // next instruction after RTS
+		0xE8,             // INX
+		0x60,             // RTS
+	};
+	memcpy(bios, program, sizeof(program));
+	bios[0xFFC] = 0x00;
+	bios[0xFFD] = 0xE0;
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+	for (int i = 0; i < 15; i++) gamateCpuStep(&g);
+	assert(g.cpu.a == 0 && (g.cpu.p & 1));
+	assert(!(g.cpu.p & 2)); // NMOS decimal Z comes from the unadjusted binary result ($9A)
+	assert(g.cpu.x == 1 && g.cpu.pc == 0xE00F);
+	gamateFree(&g);
+}
+
 int main(void) {
 	testMemory();
 	testVideo();
 	testTimingAndState();
+	testCpu();
 	return 0;
 }

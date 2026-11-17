@@ -1,0 +1,158 @@
+/* Copyright (c) 2026 Magnominus
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+#include "libretro.h"
+#include "gamate/gamate.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static retro_environment_t environCb;
+static retro_video_refresh_t videoCb;
+static retro_audio_sample_batch_t audioCb;
+static retro_input_poll_t inputPollCb;
+static retro_input_state_t inputStateCb;
+static struct Gamate gamate;
+static bool loaded;
+static uint16_t video[GAMATE_WIDTH * GAMATE_HEIGHT];
+static int16_t silence[2048 * 2];
+static uint64_t audioPhase;
+
+static void message(const char* text) {
+	struct retro_message msg = { text, 300 };
+	environCb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
+}
+
+void retro_set_environment(retro_environment_t cb) { environCb = cb; }
+void retro_set_video_refresh(retro_video_refresh_t cb) { videoCb = cb; }
+void retro_set_audio_sample(retro_audio_sample_t cb) { (void) cb; }
+void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { audioCb = cb; }
+void retro_set_input_poll(retro_input_poll_t cb) { inputPollCb = cb; }
+void retro_set_input_state(retro_input_state_t cb) { inputStateCb = cb; }
+
+void retro_init(void) {
+	gamateInit(&gamate);
+	enum retro_pixel_format format = RETRO_PIXEL_FORMAT_RGB565;
+	environCb(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
+	static const struct retro_controller_description ports[] = { { "Gamate", RETRO_DEVICE_JOYPAD } };
+	static const struct retro_controller_info controllers[] = { { ports, 1 }, { NULL, 0 } };
+	environCb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*) controllers);
+}
+
+void retro_deinit(void) { gamateFree(&gamate); }
+unsigned retro_api_version(void) { return RETRO_API_VERSION; }
+
+void retro_get_system_info(struct retro_system_info* info) {
+	memset(info, 0, sizeof(*info));
+	info->library_name = "armGamate";
+	info->library_version = "0.1";
+	info->valid_extensions = "bin|gam";
+	info->need_fullpath = false;
+	info->block_extract = false;
+}
+
+void retro_get_system_av_info(struct retro_system_av_info* info) {
+	memset(info, 0, sizeof(*info));
+	info->geometry.base_width = info->geometry.max_width = GAMATE_WIDTH;
+	info->geometry.base_height = info->geometry.max_height = GAMATE_HEIGHT;
+	info->geometry.aspect_ratio = 160.0f / 150.0f;
+	info->timing.fps = 4433000.0 / 72900.0;
+	info->timing.sample_rate = 48000.0;
+}
+
+void retro_set_controller_port_device(unsigned port, unsigned device) {
+	(void) port;
+	(void) device;
+}
+
+void retro_reset(void) {
+	if (loaded) gamateReset(&gamate);
+}
+
+static void readInput(void) {
+	inputPollCb();
+	uint8_t buttons = 0xFF;
+#define BUTTON(id, bit) do { if (inputStateCb(0, RETRO_DEVICE_JOYPAD, 0, id)) buttons &= ~(1 << bit); } while (0)
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_UP, 0);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_DOWN, 1);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_LEFT, 2);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_RIGHT, 3);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_A, 4);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_B, 5);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_START, 6);
+	BUTTON(RETRO_DEVICE_ID_JOYPAD_SELECT, 7);
+#undef BUTTON
+	gamate.buttons = buttons;
+}
+
+void retro_run(void) {
+	if (!loaded) return;
+	readInput();
+	gamateRunFrame(&gamate);
+	static const uint16_t palette[4] = { 0xCE93, 0x8CEB, 0x5327, 0x1102 };
+	for (size_t i = 0; i < sizeof(video) / sizeof(*video); i++) video[i] = palette[gamate.frameBuffer[i] & 3];
+	videoCb(video, GAMATE_WIDTH, GAMATE_HEIGHT, GAMATE_WIDTH * sizeof(*video));
+	// Keep frontend timing stable while AY synthesis is being implemented.
+	audioPhase += 48000ULL * 72900;
+	size_t frames = audioPhase / 4433000;
+	audioPhase %= 4433000;
+	audioCb(silence, frames);
+}
+
+static bool readBios(uint8_t* out) {
+	const char* system = NULL;
+	if (!environCb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system) || !system) return false;
+	static const char* names[] = { "gamate_bios_umc.bin", "gamate_bios_bit.bin" };
+	char path[4096];
+	for (size_t i = 0; i < sizeof(names) / sizeof(*names); i++) {
+		if (snprintf(path, sizeof(path), "%s/%s", system, names[i]) >= (int) sizeof(path)) continue;
+		FILE* file = fopen(path, "rb");
+		if (!file) continue;
+		size_t got = fread(out, 1, GAMATE_BIOS_SIZE, file);
+		int extra = fgetc(file);
+		fclose(file);
+		if (got == GAMATE_BIOS_SIZE && extra == EOF) return true;
+	}
+	return false;
+}
+
+bool retro_load_game(const struct retro_game_info* game) {
+	if (!game || !game->data || !game->size) return false;
+	uint8_t bios[GAMATE_BIOS_SIZE];
+	if (!readBios(bios)) {
+		message("armGamate: gamate_bios_umc.bin or gamate_bios_bit.bin is required");
+		return false;
+	}
+	if (!gamateLoad(&gamate, game->data, game->size, bios, sizeof(bios))) {
+		message("armGamate: unsupported cartridge size");
+		return false;
+	}
+	loaded = true;
+	audioPhase = 0;
+	return true;
+}
+
+bool retro_load_game_special(unsigned type, const struct retro_game_info* info, size_t count) {
+	(void) type; (void) info; (void) count;
+	return false;
+}
+
+void retro_unload_game(void) {
+	gamateFree(&gamate);
+	loaded = false;
+}
+
+unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
+size_t retro_serialize_size(void) { return loaded ? gamateStateSize(&gamate) : 0; }
+bool retro_serialize(void* data, size_t size) { return loaded && gamateSaveState(&gamate, data, size); }
+bool retro_unserialize(const void* data, size_t size) { return loaded && gamateLoadState(&gamate, data, size); }
+void retro_cheat_reset(void) { }
+void retro_cheat_set(unsigned index, bool enabled, const char* code) { (void) index; (void) enabled; (void) code; }
+
+void* retro_get_memory_data(unsigned id) {
+	return loaded && id == RETRO_MEMORY_SYSTEM_RAM ? gamate.ram : NULL;
+}
+size_t retro_get_memory_size(unsigned id) {
+	return loaded && id == RETRO_MEMORY_SYSTEM_RAM ? sizeof(gamate.ram) : 0;
+}

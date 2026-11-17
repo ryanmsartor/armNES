@@ -13,7 +13,15 @@ enum { GAMATE_BIOS_SIZE = 0x1000, GAMATE_MAX_ROM_SIZE = 0x80000 };
 
 enum GamateMapper { GAMATE_MAPPER_PLAIN, GAMATE_MAPPER_BANKED, GAMATE_MAPPER_4IN1 };
 
+struct GamateCpu {
+	uint16_t pc;
+	uint8_t a, x, y, s, p;
+	uint64_t cycles;
+	bool stopped;
+};
+
 struct Gamate {
+	struct GamateCpu cpu;
 	uint8_t ram[0x400];
 	uint8_t vram[0x4000];
 	uint8_t bios[GAMATE_BIOS_SIZE];
@@ -30,7 +38,7 @@ struct Gamate {
 
 	uint8_t buttons, openBus;
 	uint64_t masterClocks;
-	uint32_t frameClocks;
+	uint32_t frameClocks, irqClocks;
 	bool frameDone, irq;
 
 	uint8_t ayAddress;
@@ -51,6 +59,8 @@ void gamateWrite(struct Gamate* gamate, uint16_t address, uint8_t value);
 void gamateRunClocks(struct Gamate* gamate, unsigned clocks);
 void gamateRunFrame(struct Gamate* gamate);
 void gamateRender(struct Gamate* gamate);
+void gamateCpuReset(struct Gamate* gamate);
+unsigned gamateCpuStep(struct Gamate* gamate);
 
 size_t gamateStateSize(const struct Gamate* gamate);
 bool gamateSaveState(const struct Gamate* gamate, void* data, size_t size);

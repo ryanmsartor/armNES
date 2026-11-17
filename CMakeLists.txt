@@ -66,7 +66,7 @@ target_link_libraries(selfdiff armnes)
 
 # The Gamate backend is kept separate from the NES machine while it is brought up.  Its headless
 # tests cover the hardware boundary before it is connected to a CPU and frontend target.
-add_library(armgamate STATIC src/gamate/gamate.c)
+add_library(armgamate STATIC src/gamate/gamate.c src/gamate/cpu.c)
 target_include_directories(armgamate PUBLIC src)
 target_compile_options(armgamate PRIVATE -O3)
 
@@ -74,6 +74,12 @@ add_executable(gamatetest tests/gamatetest.c)
 target_link_libraries(gamatetest armgamate)
 # Assertions are the test runner; Release is the default build type for the emulator itself.
 target_compile_options(gamatetest PRIVATE -UNDEBUG)
+
+add_library(armgamate_libretro SHARED libretro/gamate.c)
+target_include_directories(armgamate_libretro PRIVATE shared/libretro)
+target_link_libraries(armgamate_libretro armgamate)
+set_target_properties(armgamate_libretro PROPERTIES PREFIX "")
+target_link_options(armgamate_libretro PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/shared/libretro/link.T -Wl,--no-undefined)
 
 # The libretro core, with the Armulators pieces it uses (libretro.h, core options) copied into shared/
 # (tools/check-shared.sh compares them with the submodule)
