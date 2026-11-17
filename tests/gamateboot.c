@@ -123,7 +123,6 @@ int main(int argc, char** argv) {
 			}
 			previousPc = pc;
 		}
-		gamateRender(&g);
 		if (pictureHasInk(&g)) nonblank++;
 		bool hasAudio = false;
 		size_t audioFrames = g.audioCount < g.audioCapacity ? g.audioCount : g.audioCapacity;

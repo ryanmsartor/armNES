@@ -67,6 +67,8 @@ struct Gamate {
 	uint64_t samplePhase;
 
 	uint16_t frameBuffer[GAMATE_WIDTH * GAMATE_HEIGHT];
+	uint8_t lcdAccum[GAMATE_WIDTH * GAMATE_HEIGHT];
+	uint16_t lcdClock, lcdRowEvent;
 	// Observational counters for bring-up tools; deliberately excluded from save states.
 	struct GamateDiagnostics diagnostics;
 };
@@ -82,7 +84,8 @@ uint8_t gamateRead(struct Gamate* gamate, uint16_t address);
 void gamateWrite(struct Gamate* gamate, uint16_t address, uint8_t value);
 void gamateRunClocks(struct Gamate* gamate, unsigned clocks);
 void gamateRunFrame(struct Gamate* gamate);
-void gamateRender(struct Gamate* gamate);
+// Immediate diagnostic preview; normal execution builds the picture progressively in run clocks.
+void gamateRenderSnapshot(struct Gamate* gamate);
 void gamateSetAudio(struct Gamate* gamate, int16_t* output, size_t frameCapacity, unsigned sampleRate);
 void gamateCpuReset(struct Gamate* gamate);
 unsigned gamateCpuStep(struct Gamate* gamate);

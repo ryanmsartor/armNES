@@ -34,6 +34,9 @@ struct GamateState {
 	struct GamateAy ay;
 	uint64_t samplePhase;
 	struct GamateCpu cpu;
+	uint8_t lcdAccum[GAMATE_WIDTH * GAMATE_HEIGHT];
+	uint16_t frameBuffer[GAMATE_WIDTH * GAMATE_HEIGHT];
+	uint16_t lcdClock, lcdRowEvent;
 };
 
 void gamateInit(struct Gamate* g) {
@@ -111,6 +114,9 @@ void gamateReset(struct Gamate* g) {
 	g->ay.envelopeStep = 15;
 	g->samplePhase = 0;
 	g->audioCount = 0;
+	g->lcdClock = g->lcdRowEvent = 0;
+	memset(g->lcdAccum, 0, sizeof(g->lcdAccum));
+	memset(g->frameBuffer, 0, sizeof(g->frameBuffer));
 	memset(&g->diagnostics, 0, sizeof(g->diagnostics));
 	gamateCpuReset(g);
 }
@@ -372,7 +378,26 @@ static void displayPosition(const struct Gamate* g, int line, int* x, int* y) {
 	}
 }
 
-void gamateRender(struct Gamate* g) {
+static void lcdRefreshRow(struct Gamate* g) {
+	if (g->displayStopped) return;
+	int line = g->lcdRowEvent / 3;
+	int pass = g->lcdRowEvent % 3;
+	int sx, sy;
+	displayPosition(g, line, &sx, &sy);
+	int plane = pass != 0;
+	if (g->swapPlanes) plane ^= 1;
+	for (int x = 0; x < GAMATE_WIDTH; x++) {
+		int px = (x + sx) & 0xFF;
+		int offset = (((sy & 0xFF) * 0x20) + (px >> 3)) << 1 | plane;
+		uint8_t bit = g->displayBlank ? 0 : (g->vram[offset] >> (7 - (px & 7))) & 1;
+		size_t pixel = (size_t) line * GAMATE_WIDTH + x;
+		if (pass == 0) g->lcdAccum[pixel] = bit;
+		else g->lcdAccum[pixel] += bit;
+		if (pass == 2) g->frameBuffer[pixel] = g->lcdAccum[pixel];
+	}
+}
+
+void gamateRenderSnapshot(struct Gamate* g) {
 	if (g->displayStopped) {
 		return;
 	}
@@ -403,6 +428,11 @@ void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 		if (++g->irqClocks == IRQ_PERIOD) {
 			g->irq = true;
 		}
+		if (++g->lcdClock == 162) {
+			g->lcdClock = 0;
+			lcdRefreshRow(g);
+			if (++g->lcdRowEvent == GAMATE_HEIGHT * 3) g->lcdRowEvent = 0;
+		}
 		if (++g->frameClocks == CLOCKS_PER_FRAME) {
 			g->frameClocks = 0;
 			g->frameDone = true;
@@ -416,7 +446,6 @@ void gamateRunFrame(struct Gamate* g) {
 	while (!g->frameDone) {
 		gamateRunClocks(g, gamateCpuStep(g) * 2);
 	}
-	gamateRender(g);
 }
 
 size_t gamateStateSize(const struct Gamate* g) {
@@ -442,10 +471,13 @@ bool gamateSaveState(const struct Gamate* g, void* data, size_t size) {
 		.ayAddress = g->ayAddress,
 		.cpu = g->cpu,
 		.ay = g->ay, .samplePhase = g->samplePhase,
+		.lcdClock = g->lcdClock, .lcdRowEvent = g->lcdRowEvent,
 	};
 	memcpy(state.ram, g->ram, sizeof(state.ram));
 	memcpy(state.vram, g->vram, sizeof(state.vram));
 	memcpy(state.ayRegisters, g->ayRegisters, sizeof(state.ayRegisters));
+	memcpy(state.lcdAccum, g->lcdAccum, sizeof(state.lcdAccum));
+	memcpy(state.frameBuffer, g->frameBuffer, sizeof(state.frameBuffer));
 	memcpy(data, &state, sizeof(state));
 	return true;
 }
@@ -490,6 +522,10 @@ bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
 	g->cpu = state.cpu;
 	g->ay = state.ay;
 	g->samplePhase = state.samplePhase;
+	g->lcdClock = state.lcdClock;
+	g->lcdRowEvent = state.lcdRowEvent;
+	memcpy(g->lcdAccum, state.lcdAccum, sizeof(g->lcdAccum));
+	memcpy(g->frameBuffer, state.frameBuffer, sizeof(g->frameBuffer));
 	memcpy(g->ayRegisters, state.ayRegisters, sizeof(g->ayRegisters));
 	return true;
 }

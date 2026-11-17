@@ -157,6 +157,16 @@ into the repository, build output, tests, or releases.
   without clipping. `gamatetest` separately verifies tone timing/sample count, noise-LFSR advance,
   envelope restart/advance, register masks, A-left isolation, B-right isolation, and equal C routing
   to both sides. `gamateboot` records deterministic per-frame audio hashes without storing samples.
+- LCD execution now follows the measured 450 row-latch events per frame: 150 visible rows, three
+  162-master-clock refresh passes per row, totaling 72,900 clocks. Plane 0 is sampled once and plane
+  1 twice (reversed by plane-swap), reproducing the physical four-level accumulation described by
+  Kevtris. A regression test changes VRAM between passes and verifies that completed earlier passes
+  are not retroactively redrawn. The partial accumulator, row event, clock phase, and completed image
+  are included in save states.
+- The progressive renderer was rerun for 300 post-entry Bomb Blaster frames. Early hashes changed
+  from the former frame-end snapshot, as expected; the settled frame-300 hash remained `e324a485`.
+  No local MAME executable or hardware capture was available for pixel-by-pixel external comparison,
+  so those hashes are regression baselines rather than claims of independent visual equivalence.
 
 ## Still needed
 

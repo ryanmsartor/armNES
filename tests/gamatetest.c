@@ -59,12 +59,32 @@ static void testVideo(void) {
 	gamateWrite(&g, 0x5004, 0x80); // plane 1, address low
 	gamateWrite(&g, 0x5005, 0);
 	gamateWrite(&g, 0x5007, 0x80);
-	gamateRender(&g);
+	gamateRenderSnapshot(&g);
 	assert(g.frameBuffer[0] == 3);
 	assert(g.frameBuffer[1] == 0);
 	gamateWrite(&g, 0x5001, 0x80);
-	gamateRender(&g);
+	gamateRenderSnapshot(&g);
 	assert(g.frameBuffer[0] == 0);
+
+	// The physical LCD samples each line in three passes. A plane-0 write after its pass must not
+	// retroactively change the completed line, even though a frame-end renderer would see it.
+	gamateReset(&g);
+	gamateWrite(&g, 0x5003, 0);
+	g.vram[0] = 0x80;
+	g.vram[1] = 0;
+	gamateRunClocks(&g, 162);
+	assert(g.lcdRowEvent == 1 && g.lcdAccum[0] == 1);
+	size_t lcdStateSize = gamateStateSize(&g);
+	void* lcdState = malloc(lcdStateSize);
+	assert(lcdState && gamateSaveState(&g, lcdState, lcdStateSize));
+	g.vram[0] = 0;
+	gamateRunClocks(&g, 324);
+	assert(g.lcdRowEvent == 3 && g.frameBuffer[0] == 1);
+	assert(gamateLoadState(&g, lcdState, lcdStateSize));
+	g.vram[0] = 0;
+	gamateRunClocks(&g, 324);
+	assert(g.lcdRowEvent == 3 && g.frameBuffer[0] == 1);
+	free(lcdState);
 	gamateFree(&g);
 }
 
