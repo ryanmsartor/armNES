@@ -52,6 +52,19 @@ hardware measurements take precedence where they conflict with an emulator.
 - Not treated as authoritative for protection, banking, special Y-window behavior, or exact timing;
   those pieces are absent or simplified.
 
+## Libretro integration references
+
+### Official libretro core-info example and RetroArch core installation guide
+
+- Core-info template: <https://github.com/libretro/libretro-core-info/blob/master/00_example_libretro.info>
+- Installation guide: <https://docs.libretro.com/guides/download-cores/>
+- Used for: declaring save-state support and its `serialized` feature level in
+  `armgamate_libretro.info`, and confirming that an out-of-tree core may load without its info file
+  while RetroArch leaves metadata-gated features such as save states disabled.
+- Implementation impact: the shipped info file now advertises the serialization backend already
+  implemented by the core. This metadata affects frontend feature discovery only; it does not
+  supply or replace serialization behavior.
+
 ## Audio specification and comparison
 
 ### General Instrument AY-3-8910/8912/8913 data manual
@@ -177,6 +190,21 @@ into the repository, build output, tests, or releases.
   libretro core polls once immediately before each emulated frame (at 60.8093 Hz), bounding its own
   input-sampling delay to one frame; remaining perceived sluggishness has not yet been separated
   from Bomb Blaster's game logic or display behavior.
+- Interactive GP Race testing initially reported “save states unsupported.” Temporary traces proved
+  RetroArch rejected the operation before calling any serialization entry point, while a direct
+  query of the built core returned its 89,568-byte fixed state size. The cause was the isolated test
+  configuration not loading this out-of-tree core's metadata. The test configuration now points at
+  the repository info directory and treats `build/` as its core directory, allowing RetroArch to
+  index and associate the out-of-tree `.so` with `armgamate_libretro.info`. With that installation-
+  equivalent layout, GP Race successfully saved and restored an 89,568-byte core payload (89,592
+  bytes in RetroArch's state file). The shipped info file explicitly declares serialized-state
+  support following the official libretro template. Temporary traces were removed. A bypass test
+  was used only to isolate metadata discovery and is not required by the installed core.
+- A subsequent installed-layout run cleanly unloaded GP Race and loaded Cosmic Fighter with a
+  content-specific state path. Cosmic Fighter reached responsive gameplay, successfully saved and
+  loaded state, reset through the libretro reset callback, and unloaded without frontend or core
+  errors. This validates the observed frontend lifecycle; it is not evidence about original-hardware
+  timing accuracy.
 
 ## Still needed
 
