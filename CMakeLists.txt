@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.13)
 project(armNES C)
 
+include(GNUInstallDirs)
+include(CTest)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -88,6 +91,21 @@ target_include_directories(armgamate_libretro PRIVATE shared/libretro)
 target_link_libraries(armgamate_libretro armgamate)
 set_target_properties(armgamate_libretro PROPERTIES PREFIX "")
 target_link_options(armgamate_libretro PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/shared/libretro/link.T -Wl,--no-undefined)
+
+# Self-contained frontend contract test: it generates an original tiny BIOS and cartridge in memory,
+# so it needs no distributed or user-supplied Gamate images.
+add_executable(gamatecoretest tests/gamatecoretest.c)
+target_include_directories(gamatecoretest PRIVATE shared/libretro)
+target_link_libraries(gamatecoretest dl)
+target_compile_options(gamatecoretest PRIVATE -UNDEBUG)
+add_test(NAME gamate-libretro COMMAND gamatecoretest $<TARGET_FILE:armgamate_libretro>)
+
+set(LIBRETRO_CORE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/libretro" CACHE PATH
+	"Installation directory for libretro core shared libraries")
+set(LIBRETRO_INFO_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/libretro/info" CACHE PATH
+	"Installation directory for libretro core info files")
+install(TARGETS armgamate_libretro LIBRARY DESTINATION "${LIBRETRO_CORE_INSTALL_DIR}")
+install(FILES libretro/armgamate_libretro.info DESTINATION "${LIBRETRO_INFO_INSTALL_DIR}")
 
 # The libretro core, with the Armulators pieces it uses (libretro.h, core options) copied into shared/
 # (tools/check-shared.sh compares them with the submodule)

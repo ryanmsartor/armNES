@@ -205,6 +205,12 @@ into the repository, build output, tests, or releases.
   loaded state, reset through the libretro reset callback, and unloaded without frontend or core
   errors. This validates the observed frontend lifecycle; it is not evidence about original-hardware
   timing accuracy.
+- `gamatecoretest` automates that frontend contract without external copyrighted data. It generates
+  an original 4 KiB test BIOS at runtime whose small 6502 program produces one AY tone, writes a
+  visible LCD pixel, and mirrors `$4400` into RAM. The harness verifies all eight active-low input
+  mappings, video and audio callbacks, the fixed state size before/after content load, serialization
+  restoration, reset, unload, and a second content load. This program is test scaffolding authored
+  for armNES; no emulator source or commercial BIOS/ROM bytes were used to create it.
 
 ## Still needed
 

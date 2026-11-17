@@ -158,6 +158,16 @@ and `armnes_arcade_libretro_android.so`:
 
 The test tools are the `nesrun`, `coretest` and `selfdiff` targets (see Diagnostics).
 
+The in-progress Gamate core and its self-contained libretro integration test build with:
+
+    cmake --build build --target armgamate_libretro gamatecoretest
+    ctest --test-dir build -R gamate-libretro --output-on-failure
+
+Install the Gamate core and metadata together with `cmake --install build --prefix <prefix>`. By
+default they go to `<prefix>/lib/libretro` and `<prefix>/share/libretro/info`. Packagers can override
+those locations with `LIBRETRO_CORE_INSTALL_DIR` and `LIBRETRO_INFO_INSTALL_DIR`; RetroArch must index
+both files for metadata-gated features such as save states.
+
 ## Standalone app
 
 `armnes` runs games in a window without RetroArch. It is Armulators' app (the `armulators`
@@ -310,7 +320,9 @@ pixels unless a Zapper or a sprite 0 hit needs them.
 
 The test tools run a game headless. `nesrun <rom> [frames]` prints a test ROM's result, or a hash of
 the last frame; `coretest <core> <rom>` drives any libretro core and checks its save states;
-`selfdiff <rom> [frames]` runs Exact and Fast side by side and reports the first frame they differ.
+`gamatecoretest <core>` checks the Gamate frontend contract with an original synthetic BIOS and no
+copyrighted inputs; `selfdiff <rom> [frames]` runs Exact and Fast side by side and reports the first
+frame they differ.
 `nesrun` takes these environment variables:
 
 | Variable | Effect |
