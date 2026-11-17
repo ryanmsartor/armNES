@@ -222,10 +222,17 @@ into the repository, build output, tests, or releases.
   bytes. This is broad automated smoke coverage, not a claim that every title is playable or
   hardware-accurate.
 - Two titles were silent during this unattended 300-frame window under both BIOSes: Further
-  Adventures of Hannibal The Cat (four AY writes) and Tornado (9,310 AY writes). Famous 7, One
-  Million Whys, and QuizFighter produced audio in only 24 frames. These are investigation targets,
-  not automatic failures, because the sweep supplies no gameplay input and silence may be correct
-  at an attract/title screen. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
+  Adventures of Hannibal The Cat (four AY writes) and Tornado (9,310 AY writes). Tornado was
+  investigated with new per-register AY/channel and controller-read diagnostics. At its title state
+  it deliberately rewrites registers 0–13 in sequence, leaving periods and volumes zero and mixer
+  register 7 at `$3F`; all three synthesized channels are consequently inactive. The game polls
+  controls sparsely (25 reads in 400 frames), so a six-frame Start pulse could be missed. A 20-frame
+  Start pulse at frame 120 was observed once, entered gameplay under both BIOS revisions, and yielded
+  audio in 270/400 frames with all three channels active and a peak of 30,558. Tornado's initial
+  silence is therefore title-state behavior, not evidence of an AY synthesis fault.
+- Famous 7, One Million Whys, and QuizFighter produced audio in only 24 frames. Hannibal's silence
+  and these limited-audio cases remain investigation targets, not automatic failures, because the
+  basic sweep supplies no gameplay input. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
   Mini Golf and Money Maze differed. Audio hashes generally differed because the two BIOS boot
   paths enter cartridge execution at different master-clock/sample phases. These differences are
   retained as leads rather than treated as proof of an emulation defect.

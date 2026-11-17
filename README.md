@@ -328,6 +328,11 @@ Exact and Fast side by side and reports the first frame they differ.
 both `gamate_bios_umc.bin` and `gamate_bios_bit.bin`. Its report contains filenames, execution
 diagnostics, and video/audio hashes, never firmware or cartridge contents. The directory and images
 are user-supplied and are not copied into the repository.
+
+For targeted headless runs, `GAMATEBOOT_PRESS="frame:mask:frames,..."` supplies controller pulses to
+`gamateboot` after cartridge entry. Mask bits follow the Gamate register: Up `01`, Down `02`, Left
+`04`, Right `08`, A `10`, B `20`, Start `40`, Select `80`. For example, `120:0x40:6` holds Start for
+six frames beginning at frame 120.
 `nesrun` takes these environment variables:
 
 | Variable | Effect |

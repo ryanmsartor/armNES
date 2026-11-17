@@ -23,6 +23,8 @@ struct GamateCpu {
 struct GamateDiagnostics {
 	uint64_t instructions, unsupportedOpcodes, irqsTaken;
 	uint64_t ayWrites, lcdWrites, vramWrites, bankWrites;
+	uint64_t ayRegisterWrites[16], ayActiveSamples[3];
+	uint64_t controllerReads, pressedControllerReads;
 	uint16_t lastUnsupportedPc;
 	uint8_t lastUnsupportedOpcode;
 };

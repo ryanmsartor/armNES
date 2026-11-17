@@ -178,6 +178,8 @@ uint8_t gamateRead(struct Gamate* g, uint16_t address) {
 		goto done;
 	}
 	if ((address & 0xFC00) == 0x4400) {
+		g->diagnostics.controllerReads++;
+		g->diagnostics.pressedControllerReads += g->buttons != 0xFF;
 		value = g->buttons;
 		goto done;
 	}
@@ -221,6 +223,7 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		};
 		g->ayAddress = address & 0x0F;
 		g->diagnostics.ayWrites++;
+		g->diagnostics.ayRegisterWrites[g->ayAddress]++;
 		g->ayRegisters[g->ayAddress] = value & masks[g->ayAddress];
 		if (g->ayAddress == 13) {
 			uint8_t shape = value & 0x0F;
@@ -326,6 +329,9 @@ static int channelLevel(const struct Gamate* g, int channel) {
 
 static void audioSample(struct Gamate* g) {
 	int a = channelLevel(g, 0), b = channelLevel(g, 1), c = channelLevel(g, 2);
+	g->diagnostics.ayActiveSamples[0] += a != 0;
+	g->diagnostics.ayActiveSamples[1] += b != 0;
+	g->diagnostics.ayActiveSamples[2] += c != 0;
 	int input[2] = { a * 80 + c * 40, b * 80 + c * 40 };
 	int16_t sample[2];
 	for (int side = 0; side < 2; side++) {

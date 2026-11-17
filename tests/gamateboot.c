@@ -47,6 +47,24 @@ static uint8_t* readFile(const char* path, size_t* size) {
 	return data;
 }
 
+// GAMATEBOOT_PRESS="frame:mask:frames,..." presses active-high mask bits in the diagnostic input
+// description (the emulated controller bus remains active low). Frame numbers are post-entry.
+static uint8_t buttonsForFrame(unsigned frame) {
+	uint8_t buttons = 0xFF;
+	const char* press = getenv("GAMATEBOOT_PRESS");
+	while (press && *press) {
+		char* end;
+		unsigned from = (unsigned) strtoul(press, &end, 0);
+		if (*end++ != ':') break;
+		unsigned mask = (unsigned) strtoul(end, &end, 0);
+		if (*end++ != ':') break;
+		unsigned count = (unsigned) strtoul(end, &end, 0);
+		if (frame >= from && frame < from + count) buttons &= (uint8_t) ~mask;
+		press = *end == ',' ? end + 1 : NULL;
+	}
+	return buttons;
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3 || argc > 4) {
 		fprintf(stderr, "usage: %s gamate_bios.bin cartridge.bin [frames-after-entry]\n", argv[0]);
@@ -110,6 +128,7 @@ int main(int argc, char** argv) {
 	uint64_t longestSamePc = 0, samePc = 0;
 	uint16_t previousPc = 0xFFFF;
 	for (unsigned frame = 1; frame <= framesWanted; frame++) {
+		g.buttons = buttonsForFrame(frame);
 		g.frameDone = false;
 		g.audioCount = 0;
 		while (!g.frameDone) {
@@ -145,6 +164,17 @@ int main(int argc, char** argv) {
 		(unsigned long long) g.diagnostics.lcdWrites,
 		(unsigned long long) g.diagnostics.vramWrites, (unsigned long long) g.diagnostics.bankWrites,
 		(unsigned long long) longestSamePc);
+	printf("AY registers:");
+	for (unsigned i = 0; i < 16; i++) printf(" %02X", g.ayRegisters[i]);
+	printf("\nAY writes/register:");
+	for (unsigned i = 0; i < 16; i++) printf(" %llu", (unsigned long long) g.diagnostics.ayRegisterWrites[i]);
+	printf("\nAY active samples: A=%llu B=%llu C=%llu\n",
+		(unsigned long long) g.diagnostics.ayActiveSamples[0],
+		(unsigned long long) g.diagnostics.ayActiveSamples[1],
+		(unsigned long long) g.diagnostics.ayActiveSamples[2]);
+	printf("controller reads: %llu (%llu while pressed)\n",
+		(unsigned long long) g.diagnostics.controllerReads,
+		(unsigned long long) g.diagnostics.pressedControllerReads);
 	if (g.diagnostics.unsupportedOpcodes) {
 		fprintf(stderr, "unsupported opcode $%02X at $%04X (%llu total)\n",
 			g.diagnostics.lastUnsupportedOpcode, g.diagnostics.lastUnsupportedPc,
