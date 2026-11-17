@@ -230,9 +230,14 @@ into the repository, build output, tests, or releases.
   Start pulse at frame 120 was observed once, entered gameplay under both BIOS revisions, and yielded
   audio in 270/400 frames with all three channels active and a peak of 30,558. Tornado's initial
   silence is therefore title-state behavior, not evidence of an AY synthesis fault.
-- Famous 7, One Million Whys, and QuizFighter produced audio in only 24 frames. Hannibal's silence
-  and these limited-audio cases remain investigation targets, not automatic failures, because the
-  basic sweep supplies no gameplay input. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
+- Further Adventures of Hannibal The Cat was also a 300-frame-window false positive rather than a
+  synthesis failure. Without input its first audible output occurs after that window: 44/400 frames
+  and 344/700 frames were audible, initially at low amplitude through channel C before the longer
+  attract/demo sequence used all channels. A 30-frame Start pulse at frame 120 was seen by 61 of the
+  game's frequent controller reads, entered gameplay under both BIOS revisions, and produced audio
+  in 281/400 frames with all three channels active. An A-only pulse did not leave the title flow.
+- Famous 7, One Million Whys, and QuizFighter produced audio in only 24 frames and remain targeted
+  investigation candidates rather than automatic failures. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
   Mini Golf and Money Maze differed. Audio hashes generally differed because the two BIOS boot
   paths enter cartridge execution at different master-clock/sample phases. These differences are
   retained as leads rather than treated as proof of an emulation defect.
