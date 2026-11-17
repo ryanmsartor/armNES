@@ -52,6 +52,36 @@ hardware measurements take precedence where they conflict with an emulator.
 - Not treated as authoritative for protection, banking, special Y-window behavior, or exact timing;
   those pieces are absent or simplified.
 
+## Audio specification and comparison
+
+### General Instrument AY-3-8910/8912/8913 data manual
+
+- Scan: <https://map.grauw.nl/resources/sound/generalinstrument_ay-3-8910.pdf>
+- Status: original chip-manufacturer data manual.
+- Used for: register layout and masks, tone/noise/mixer signal paths, amplitude/envelope controls,
+  period widths, envelope shape bits, reset state, and the relationship between the input clock and
+  the tone, noise, and envelope dividers.
+
+### Ayumi
+
+- URL: <https://github.com/true-grue/ayumi>
+- License: MIT.
+- Status: independent high-accuracy AY-3-8910/YM2149 implementation.
+- Used for: comparison of counter organization, mixer gating, envelope restart/hold/alternate
+  semantics, sample-rate conversion, and DC-removal strategy. No Ayumi source was copied.
+
+### emu2149
+
+- Example source: <https://github.com/emestee/bk-emulator/blob/master/emu2149.c>
+- Status: Mitsutaka Okazaki's established AY/YM implementation; its source lists the AY data sheet,
+  MSX documentation, and earlier emulators as references.
+- Used for: cross-checking the AY rather than YM logarithmic 16-level amplitude curve and zero-period
+  handling. The compact level table in `gamate.c` is an independently scaled integer expression of
+  the documented AY curve, not imported code.
+
+Gamate-specific clocking and channel routing continue to come from Kevtris's physical measurements:
+the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides.
+
 ## Compatibility reference
 
 ### MAME Gamate implementation
@@ -123,6 +153,10 @@ into the repository, build output, tests, or releases.
   hashes, nonblank output, IRQ service, LCD/VRAM traffic, and expected bank changes, with no unknown
   opcodes or persistent self-loop traps. Frame hashes are computed from four-shade pixel indices and
   contain no ROM or BIOS data.
+- Audio validation over the same representative set observed PSG register writes and nonzero output
+  without clipping. `gamatetest` separately verifies tone timing/sample count, noise-LFSR advance,
+  envelope restart/advance, register masks, A-left isolation, B-right isolation, and equal C routing
+  to both sides. `gamateboot` records deterministic per-frame audio hashes without storing samples.
 
 ## Still needed
 

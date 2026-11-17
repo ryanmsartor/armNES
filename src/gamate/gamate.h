@@ -22,9 +22,19 @@ struct GamateCpu {
 
 struct GamateDiagnostics {
 	uint64_t instructions, unsupportedOpcodes, irqsTaken;
-	uint64_t lcdWrites, vramWrites, bankWrites;
+	uint64_t ayWrites, lcdWrites, vramWrites, bankWrites;
 	uint16_t lastUnsupportedPc;
 	uint8_t lastUnsupportedOpcode;
+};
+
+struct GamateAy {
+	uint32_t toneCounter[3], noiseCounter, envelopeCounter;
+	uint32_t noiseLfsr;
+	int8_t envelopeStep;
+	uint8_t envelopeAttack;
+	bool toneLevel[3], noiseLevel;
+	bool envelopeHold, envelopeAlternate, envelopeHolding;
+	int32_t previousInput[2], highPass[2];
 };
 
 struct Gamate {
@@ -50,6 +60,11 @@ struct Gamate {
 
 	uint8_t ayAddress;
 	uint8_t ayRegisters[16];
+	struct GamateAy ay;
+	int16_t* audioOut;
+	size_t audioCapacity, audioCount;
+	unsigned sampleRate;
+	uint64_t samplePhase;
 
 	uint16_t frameBuffer[GAMATE_WIDTH * GAMATE_HEIGHT];
 	// Observational counters for bring-up tools; deliberately excluded from save states.
@@ -68,6 +83,7 @@ void gamateWrite(struct Gamate* gamate, uint16_t address, uint8_t value);
 void gamateRunClocks(struct Gamate* gamate, unsigned clocks);
 void gamateRunFrame(struct Gamate* gamate);
 void gamateRender(struct Gamate* gamate);
+void gamateSetAudio(struct Gamate* gamate, int16_t* output, size_t frameCapacity, unsigned sampleRate);
 void gamateCpuReset(struct Gamate* gamate);
 unsigned gamateCpuStep(struct Gamate* gamate);
 

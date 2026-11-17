@@ -121,10 +121,73 @@ static void testCpu(void) {
 	gamateFree(&g);
 }
 
+static void testAudio(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+	int16_t audio[5000 * 2] = { 0 };
+	gamateSetAudio(&g, audio, 5000, 48000);
+	gamateWrite(&g, 0x4000, 10); // channel A period: 1.10825 MHz / (16 * 10)
+	gamateWrite(&g, 0x4001, 0);
+	gamateWrite(&g, 0x4007, 0x3E); // tone A only; all noise and other tones disabled
+	gamateWrite(&g, 0x4008, 15);
+	gamateRunClocks(&g, 443300); // exactly one tenth of a second
+	assert(g.audioCount == 4800);
+	bool left = false, right = false;
+	for (size_t i = 0; i < g.audioCount; i++) {
+		left |= audio[i * 2] != 0;
+		right |= audio[i * 2 + 1] != 0;
+	}
+	assert(left && !right);
+
+	memset(audio, 0, sizeof(audio));
+	gamateReset(&g);
+	gamateWrite(&g, 0x4002, 10);
+	gamateWrite(&g, 0x4007, 0x3D); // tone B only
+	gamateWrite(&g, 0x4009, 15);
+	gamateRunClocks(&g, 44330);
+	left = right = false;
+	for (size_t i = 0; i < g.audioCount; i++) {
+		left |= audio[i * 2] != 0;
+		right |= audio[i * 2 + 1] != 0;
+	}
+	assert(!left && right);
+
+	memset(audio, 0, sizeof(audio));
+	gamateReset(&g);
+	gamateWrite(&g, 0x4004, 10);
+	gamateWrite(&g, 0x4007, 0x3B); // tone C only
+	gamateWrite(&g, 0x400A, 15);
+	gamateRunClocks(&g, 44330);
+	left = right = false;
+	for (size_t i = 0; i < g.audioCount; i++) {
+		left |= audio[i * 2] != 0;
+		right |= audio[i * 2 + 1] != 0;
+		assert(audio[i * 2] == audio[i * 2 + 1]);
+	}
+	assert(left && right);
+
+	gamateReset(&g);
+	gamateWrite(&g, 0x4006, 0); // zero periods behave as one
+	gamateRunClocks(&g, 64);
+	assert(g.ay.noiseLfsr == 0xFFFF);
+	gamateWrite(&g, 0x400B, 1);
+	gamateWrite(&g, 0x400C, 0);
+	gamateWrite(&g, 0x400D, 0x0C); // repeating rising envelope
+	assert((g.ay.envelopeStep ^ g.ay.envelopeAttack) == 0);
+	gamateRunClocks(&g, 1024);
+	assert((g.ay.envelopeStep ^ g.ay.envelopeAttack) == 1);
+	gamateWrite(&g, 0x4001, 0xFF);
+	assert(g.ayRegisters[1] == 0x0F); // unused register bits are not stored
+	gamateFree(&g);
+}
+
 int main(void) {
 	testMemory();
 	testVideo();
 	testTimingAndState();
 	testCpu();
+	testAudio();
 	return 0;
 }

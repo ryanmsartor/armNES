@@ -31,11 +31,14 @@ struct GamateState {
 	uint64_t masterClocks;
 	uint32_t frameClocks, irqClocks;
 	uint8_t ayAddress, ayRegisters[16];
+	struct GamateAy ay;
+	uint64_t samplePhase;
 	struct GamateCpu cpu;
 };
 
 void gamateInit(struct Gamate* g) {
 	memset(g, 0, sizeof(*g));
+	g->sampleRate = 48000;
 }
 
 bool gamateLoad(struct Gamate* g, const uint8_t* rom, size_t romSize,
@@ -102,6 +105,12 @@ void gamateReset(struct Gamate* g) {
 	g->openBus = 0xFF;
 	g->ayAddress = 0;
 	memset(g->ayRegisters, 0, sizeof(g->ayRegisters));
+	memset(&g->ay, 0, sizeof(g->ay));
+	g->ay.noiseLfsr = 0x1FFFF;
+	g->ay.noiseLevel = true;
+	g->ay.envelopeStep = 15;
+	g->samplePhase = 0;
+	g->audioCount = 0;
 	memset(&g->diagnostics, 0, sizeof(g->diagnostics));
 	gamateCpuReset(g);
 }
@@ -200,8 +209,27 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		return;
 	}
 	if ((address & 0xFC00) == 0x4000) {
+		static const uint8_t masks[16] = {
+			0xFF, 0x0F, 0xFF, 0x0F, 0xFF, 0x0F, 0x1F, 0x3F,
+			0x1F, 0x1F, 0x1F, 0xFF, 0xFF, 0x0F, 0xFF, 0xFF,
+		};
 		g->ayAddress = address & 0x0F;
-		g->ayRegisters[g->ayAddress] = value;
+		g->diagnostics.ayWrites++;
+		g->ayRegisters[g->ayAddress] = value & masks[g->ayAddress];
+		if (g->ayAddress == 13) {
+			uint8_t shape = value & 0x0F;
+			g->ay.envelopeAttack = shape & 4 ? 15 : 0;
+			if (!(shape & 8)) {
+				g->ay.envelopeHold = true;
+				g->ay.envelopeAlternate = g->ay.envelopeAttack != 0;
+			} else {
+				g->ay.envelopeHold = shape & 1;
+				g->ay.envelopeAlternate = shape & 2;
+			}
+			g->ay.envelopeHolding = false;
+			g->ay.envelopeStep = 15;
+			g->ay.envelopeCounter = 0;
+		}
 		return;
 	}
 	if ((address & 0xFC00) == 0x5000) {
@@ -243,6 +271,78 @@ void gamateWrite(struct Gamate* g, uint16_t address, uint8_t value) {
 		if (g->bank != value) g->diagnostics.bankWrites++;
 		g->bank = value;
 	}
+}
+
+static uint32_t tonePeriod(const struct Gamate* g, int channel) {
+	uint32_t period = g->ayRegisters[channel * 2] | (uint32_t) g->ayRegisters[channel * 2 + 1] << 8;
+	return (period ? period : 1) * 32;
+}
+
+static void ayClock(struct Gamate* g) {
+	for (int channel = 0; channel < 3; channel++) {
+		if (++g->ay.toneCounter[channel] >= tonePeriod(g, channel)) {
+			g->ay.toneCounter[channel] = 0;
+			g->ay.toneLevel[channel] = !g->ay.toneLevel[channel];
+		}
+	}
+	uint32_t noisePeriod = (g->ayRegisters[6] ? g->ayRegisters[6] : 1) * 64;
+	if (++g->ay.noiseCounter >= noisePeriod) {
+		g->ay.noiseCounter = 0;
+		uint32_t feedback = (g->ay.noiseLfsr ^ (g->ay.noiseLfsr >> 3)) & 1;
+		g->ay.noiseLfsr = g->ay.noiseLfsr >> 1 | feedback << 16;
+		g->ay.noiseLevel = g->ay.noiseLfsr & 1;
+	}
+	uint32_t envelope = g->ayRegisters[11] | (uint32_t) g->ayRegisters[12] << 8;
+	if (++g->ay.envelopeCounter >= (envelope ? envelope : 1) * 1024) {
+		g->ay.envelopeCounter = 0;
+		if (!g->ay.envelopeHolding && --g->ay.envelopeStep < 0) {
+			if (g->ay.envelopeHold) {
+				if (g->ay.envelopeAlternate) g->ay.envelopeAttack ^= 15;
+				g->ay.envelopeHolding = true;
+				g->ay.envelopeStep = 0;
+			} else {
+				if (g->ay.envelopeAlternate) g->ay.envelopeAttack ^= 15;
+				g->ay.envelopeStep = 15;
+			}
+		}
+	}
+}
+
+static int channelLevel(const struct Gamate* g, int channel) {
+	static const uint8_t levels[16] = { 0, 1, 2, 3, 5, 7, 11, 15, 22, 31, 45, 63, 90, 127, 180, 255 };
+	bool tone = (g->ayRegisters[7] & (1 << channel)) || g->ay.toneLevel[channel];
+	bool noise = (g->ayRegisters[7] & (8 << channel)) || g->ay.noiseLevel;
+	if (!tone || !noise) return 0;
+	uint8_t volume = g->ayRegisters[8 + channel];
+	uint8_t index = volume & 0x10 ? (g->ay.envelopeStep ^ g->ay.envelopeAttack) : volume & 0x0F;
+	return levels[index];
+}
+
+static void audioSample(struct Gamate* g) {
+	int a = channelLevel(g, 0), b = channelLevel(g, 1), c = channelLevel(g, 2);
+	int input[2] = { a * 80 + c * 40, b * 80 + c * 40 };
+	int16_t sample[2];
+	for (int side = 0; side < 2; side++) {
+		// First-order high-pass filter removes the AY's unipolar DAC offset.
+		int32_t out = input[side] - g->ay.previousInput[side] +
+			(int32_t) ((int64_t) g->ay.highPass[side] * 32700 / 32768);
+		g->ay.previousInput[side] = input[side];
+		g->ay.highPass[side] = out;
+		if (out > 32767) out = 32767;
+		if (out < -32768) out = -32768;
+		sample[side] = out;
+	}
+	if (g->audioOut && g->audioCount < g->audioCapacity) {
+		g->audioOut[g->audioCount * 2] = sample[0];
+		g->audioOut[g->audioCount * 2 + 1] = sample[1];
+	}
+	g->audioCount++;
+}
+
+void gamateSetAudio(struct Gamate* g, int16_t* output, size_t frameCapacity, unsigned sampleRate) {
+	g->audioOut = output;
+	g->audioCapacity = frameCapacity;
+	g->sampleRate = sampleRate ? sampleRate : 48000;
 }
 
 static void displayPosition(const struct Gamate* g, int line, int* x, int* y) {
@@ -294,6 +394,12 @@ void gamateRender(struct Gamate* g) {
 void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 	for (unsigned i = 0; i < clocks; i++) {
 		g->masterClocks++;
+		ayClock(g);
+		g->samplePhase += g->sampleRate;
+		if (g->samplePhase >= 4433000) {
+			g->samplePhase -= 4433000;
+			audioSample(g);
+		}
 		if (++g->irqClocks == IRQ_PERIOD) {
 			g->irq = true;
 		}
@@ -306,6 +412,7 @@ void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 
 void gamateRunFrame(struct Gamate* g) {
 	g->frameDone = false;
+	g->audioCount = 0;
 	while (!g->frameDone) {
 		gamateRunClocks(g, gamateCpuStep(g) * 2);
 	}
@@ -334,6 +441,7 @@ bool gamateSaveState(const struct Gamate* g, void* data, size_t size) {
 		.masterClocks = g->masterClocks, .frameClocks = g->frameClocks, .irqClocks = g->irqClocks,
 		.ayAddress = g->ayAddress,
 		.cpu = g->cpu,
+		.ay = g->ay, .samplePhase = g->samplePhase,
 	};
 	memcpy(state.ram, g->ram, sizeof(state.ram));
 	memcpy(state.vram, g->vram, sizeof(state.vram));
@@ -380,6 +488,8 @@ bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
 	g->irqClocks = state.irqClocks;
 	g->ayAddress = state.ayAddress;
 	g->cpu = state.cpu;
+	g->ay = state.ay;
+	g->samplePhase = state.samplePhase;
 	memcpy(g->ayRegisters, state.ayRegisters, sizeof(g->ayRegisters));
 	return true;
 }

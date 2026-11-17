@@ -16,8 +16,7 @@ static retro_input_state_t inputStateCb;
 static struct Gamate gamate;
 static bool loaded;
 static uint16_t video[GAMATE_WIDTH * GAMATE_HEIGHT];
-static int16_t silence[2048 * 2];
-static uint64_t audioPhase;
+static int16_t audio[2048 * 2];
 
 static void message(const char* text) {
 	struct retro_message msg = { text, 300 };
@@ -89,15 +88,13 @@ static void readInput(void) {
 void retro_run(void) {
 	if (!loaded) return;
 	readInput();
+	gamateSetAudio(&gamate, audio, sizeof(audio) / sizeof(audio[0]) / 2, 48000);
 	gamateRunFrame(&gamate);
 	static const uint16_t palette[4] = { 0xCE93, 0x8CEB, 0x5327, 0x1102 };
 	for (size_t i = 0; i < sizeof(video) / sizeof(*video); i++) video[i] = palette[gamate.frameBuffer[i] & 3];
 	videoCb(video, GAMATE_WIDTH, GAMATE_HEIGHT, GAMATE_WIDTH * sizeof(*video));
-	// Keep frontend timing stable while AY synthesis is being implemented.
-	audioPhase += 48000ULL * 72900;
-	size_t frames = audioPhase / 4433000;
-	audioPhase %= 4433000;
-	audioCb(silence, frames);
+	size_t frames = gamate.audioCount < gamate.audioCapacity ? gamate.audioCount : gamate.audioCapacity;
+	audioCb(audio, frames);
 }
 
 static bool readBios(uint8_t* out) {
@@ -129,7 +126,6 @@ bool retro_load_game(const struct retro_game_info* game) {
 		return false;
 	}
 	loaded = true;
-	audioPhase = 0;
 	return true;
 }
 

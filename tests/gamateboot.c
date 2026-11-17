@@ -22,6 +22,15 @@ static bool pictureHasInk(const struct Gamate* g) {
 	return false;
 }
 
+static uint32_t audioHash(const int16_t* audio, size_t frames) {
+	uint32_t hash = 2166136261U;
+	for (size_t i = 0; i < frames * 2; i++) {
+		hash ^= (uint16_t) audio[i];
+		hash *= 16777619U;
+	}
+	return hash;
+}
+
 static uint8_t* readFile(const char* path, size_t* size) {
 	FILE* file = fopen(path, "rb");
 	if (!file) return NULL;
@@ -94,11 +103,15 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	unsigned nonblank = 0;
+	unsigned nonblank = 0, audible = 0;
+	unsigned peak = 0;
+	int16_t audio[2048 * 2];
+	gamateSetAudio(&g, audio, 2048, 48000);
 	uint64_t longestSamePc = 0, samePc = 0;
 	uint16_t previousPc = 0xFFFF;
 	for (unsigned frame = 1; frame <= framesWanted; frame++) {
 		g.frameDone = false;
+		g.audioCount = 0;
 		while (!g.frameDone) {
 			uint16_t pc = g.cpu.pc;
 			unsigned cycles = gamateCpuStep(&g);
@@ -112,15 +125,25 @@ int main(int argc, char** argv) {
 		}
 		gamateRender(&g);
 		if (pictureHasInk(&g)) nonblank++;
+		bool hasAudio = false;
+		size_t audioFrames = g.audioCount < g.audioCapacity ? g.audioCount : g.audioCapacity;
+		for (size_t i = 0; i < audioFrames * 2; i++) {
+			int value = audio[i] < 0 ? -(int) audio[i] : audio[i];
+			if (value) hasAudio = true;
+			if ((unsigned) value > peak) peak = value;
+		}
+		if (hasAudio) audible++;
 		if (frame == 1 || frame == 60 || frame == framesWanted) {
-			printf("frame %u: hash=%08X PC=$%04X bank=%u/%u\n", frame, pictureHash(&g),
-				g.cpu.pc, g.firstBank, g.bank);
+			printf("frame %u: video=%08X audio=%08X/%zu PC=$%04X bank=%u/%u\n", frame,
+				pictureHash(&g), audioHash(audio, audioFrames), audioFrames, g.cpu.pc, g.firstBank, g.bank);
 		}
 		if (g.diagnostics.unsupportedOpcodes) break;
 	}
-	printf("post-entry: mapper=%d, nonblank=%u/%u, IRQs=%llu, LCD writes=%llu, VRAM writes=%llu, "
-		"bank changes=%llu, longest self-loop=%llu\n", g.mapper, nonblank, framesWanted,
-		(unsigned long long) g.diagnostics.irqsTaken, (unsigned long long) g.diagnostics.lcdWrites,
+	printf("post-entry: mapper=%d, nonblank=%u/%u, audible=%u/%u peak=%u, IRQs=%llu, AY writes=%llu, "
+		"LCD writes=%llu, VRAM writes=%llu, bank changes=%llu, longest self-loop=%llu\n",
+		g.mapper, nonblank, framesWanted, audible, framesWanted, peak,
+		(unsigned long long) g.diagnostics.irqsTaken, (unsigned long long) g.diagnostics.ayWrites,
+		(unsigned long long) g.diagnostics.lcdWrites,
 		(unsigned long long) g.diagnostics.vramWrites, (unsigned long long) g.diagnostics.bankWrites,
 		(unsigned long long) longestSamePc);
 	if (g.diagnostics.unsupportedOpcodes) {
