@@ -47,20 +47,25 @@ static void compare(struct GamateCpu* c, uint8_t left, uint8_t right) {
 	zn(c, left - right);
 }
 
-// NMOS decimal mode keeps N, V and Z from the binary intermediate result; only A and C reflect the
-// BCD correction. This differs from the later 65C02 and is intentionally tested separately.
+// NMOS decimal mode derives Z from the binary result. ADC derives N/V after the low-nibble carry
+// but before the high-nibble correction; SBC derives N/V from the binary result. These otherwise
+// undocumented details matter for invalid BCD digits and are exhaustively tested.
 static void adc(struct GamateCpu* c, uint8_t value) {
 	unsigned carry = c->p & C;
 	unsigned binary = c->a + value + carry;
-	flag(c, V, ~(c->a ^ value) & (c->a ^ binary) & 0x80);
-	zn(c, binary);
 	if (c->p & D) {
-		unsigned adjusted = binary;
-		if ((c->a & 0x0F) + (value & 0x0F) + carry > 9) adjusted += 6;
-		if (adjusted > 0x99) adjusted += 0x60;
-		flag(c, C, adjusted > 0xFF);
-		c->a = adjusted;
+		unsigned low = (c->a & 0x0F) + (value & 0x0F) + carry;
+		unsigned high = (c->a >> 4) + (value >> 4) + (low > 9);
+		flag(c, Z, (uint8_t) binary == 0);
+		flag(c, N, high & 8);
+		flag(c, V, ((high << 4) ^ c->a) & 0x80 && !((c->a ^ value) & 0x80));
+		if (low > 9) low += 6;
+		if (high > 9) high += 6;
+		flag(c, C, high > 0x0F);
+		c->a = (high << 4) | (low & 0x0F);
 	} else {
+		flag(c, V, ~(c->a ^ value) & (c->a ^ binary) & 0x80);
+		zn(c, binary);
 		flag(c, C, binary > 0xFF);
 		c->a = binary;
 	}

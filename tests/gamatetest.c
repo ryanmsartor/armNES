@@ -419,6 +419,52 @@ static void testCpu(void) {
 	gamateFree(&g);
 }
 
+static void testCpuDecimal(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	bios[0] = 0x69; // ADC #operand; changed to SBC after the first exhaustive pass
+	bios[0xFFC] = 0x00; bios[0xFFD] = 0xE0;
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+	for (unsigned operation = 0; operation < 2; operation++) {
+		g.bios[0] = operation ? 0xE9 : 0x69;
+		for (unsigned a = 0; a < 0x100; a++) for (unsigned value = 0; value < 0x100; value++) {
+			g.bios[1] = value;
+			for (unsigned carry = 0; carry < 2; carry++) {
+				g.cpu.pc = 0xE000;
+				g.cpu.a = a;
+				g.cpu.p = 0x28 | carry; // U and decimal set
+				g.cpu.irqMask = false;
+				assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE002);
+				unsigned binary = operation ? a - value - !carry : a + value + carry;
+				unsigned expected, expectedFlags = ((uint8_t) binary == 0) ? 2 : 0;
+				if (operation) {
+					int low = (a & 0x0F) - (value & 0x0F) - !carry;
+					int high = (a >> 4) - (value >> 4);
+					if (low < 0) { low -= 6; high--; }
+					if (high < 0) high -= 6;
+					expected = (unsigned) ((high << 4) | (low & 0x0F)) & 0xFF;
+					expectedFlags |= binary < 0x100;
+					expectedFlags |= binary & 0x80;
+					expectedFlags |= ((a ^ value) & (a ^ binary) & 0x80) ? 0x40 : 0;
+				} else {
+					unsigned low = (a & 0x0F) + (value & 0x0F) + carry;
+					unsigned high = (a >> 4) + (value >> 4) + (low > 9);
+					expectedFlags |= high & 8 ? 0x80 : 0;
+					expectedFlags |= (((high << 4) ^ a) & 0x80 && !((a ^ value) & 0x80)) ? 0x40 : 0;
+					if (low > 9) low += 6;
+					if (high > 9) high += 6;
+					expectedFlags |= high > 0x0F;
+					expected = ((high << 4) | (low & 0x0F)) & 0xFF;
+				}
+				assert(g.cpu.a == expected);
+				assert((g.cpu.p & 0xC3) == expectedFlags);
+			}
+		}
+	}
+	gamateFree(&g);
+}
+
 static void testAudio(void) {
 	struct Gamate g;
 	gamateInit(&g);
@@ -490,6 +536,7 @@ int main(void) {
 	testIrq();
 	testIrqMaskTiming();
 	testCpu();
+	testCpuDecimal();
 	testAudio();
 	return 0;
 }

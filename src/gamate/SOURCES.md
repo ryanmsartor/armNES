@@ -132,9 +132,20 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
 
 - URL: <https://www.nesdev.org/wiki/Visual6502wiki/6502DecimalMode>
 - Status: transistor-level analysis and exhaustive tests of NMOS 6502 decimal arithmetic.
-- Used for: the deliberate NMOS behavior where decimal `ADC`/`SBC` adjust the accumulator and carry
-  while N, V, and Z reflect the binary intermediate result. No Visual6502 implementation code is
-  used.
+- Used for: identifying the NMOS decimal datapath and its distinction from later CMOS parts. This
+  motivated exhaustive testing rather than treating invalid BCD digits as ordinary binary-adjusted
+  arithmetic. No Visual6502 implementation code is used.
+
+### Bruce Clark decimal-mode test, as maintained by Klaus Dormann
+
+- URL: <https://github.com/Klaus2m5/6502_65C02_functional_tests/blob/master/6502_decimal_test.a65>
+- Status: public-domain exhaustive test whose predicted results are calculated with 6502
+  instructions; its comments identify Bruce Clark as the author.
+- Used for: independently specifying all accumulator/carry combinations for NMOS decimal `ADC` and
+  `SBC`, including invalid BCD digits, and the NMOS points at which N, V, and Z are observed.
+- Implementation impact: replaced a valid-BCD-oriented ADC shortcut that mishandled invalid digits
+  and computed ADC N/V before the low-nibble carry. `gamatetest` now checks 262,144 decimal
+  operations across every accumulator, operand, carry, and both arithmetic instructions.
 
 ### Visual6502 interrupt-timing research
 
