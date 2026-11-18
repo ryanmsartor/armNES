@@ -286,6 +286,15 @@ into the repository, build output, tests, or releases.
   behavior. E freezes the internal 162-clock pass and row-event position because the physical pixel,
   row, frame, and inversion clocks stop; clearing E resumes that position. N continues refresh while
   emitting zero pixel data, so a plane pass completed before mid-line blanking remains accumulated.
+- The special Y-scroll/window audit corrected two mappings against the same physical notes. Values
+  `$C8-CF`, `$D8-DF`, `$E8-EF`, and `$F8-FF` now use the ordinary row-zero origin instead of
+  repeating row zero on every LCD line. For `$D0-D7`, `$E0-E7`, and `$F0-F7`, the low three bits now
+  remove leading rows from the fixed `$F8-FF` area in the measured order (F0 exposes eight rows, F1
+  seven, through F7 one), then normal rows resume; the fixed portion ignores X scroll. LCDcon W's
+  explicit 16-row `$D0-DF` window takes precedence for the top of the display even with a special Y
+  value. Pixel-level tests cover these boundaries. The post-change 116-case sweep passed, and none
+  of its frame-300 video/audio/PC lines changed, consistent with Kevtris's observation that known
+  games may not use the special window behavior during ordinary execution.
 
 ## Still needed
 

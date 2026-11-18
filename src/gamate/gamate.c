@@ -358,29 +358,31 @@ void gamateSetAudio(struct Gamate* g, int16_t* output, size_t frameCapacity, uns
 }
 
 static void displayPosition(const struct Gamate* g, int line, int* x, int* y) {
+	if (g->window && line < 0x10) {
+		*x = 0;
+		*y = 0xD0 + line;
+		return;
+	}
 	if (g->scrollY < 0xC8) {
 		*y = line + g->scrollY;
 		if (*y >= 0xC8) {
 			*y -= 0xC8;
 		}
 		*x = g->scrollX;
-		if (g->window && line < 0x10) {
-			*x = 0;
-			*y = 0xD0 + line;
-		}
 		return;
 	}
 	*x = g->scrollX;
 	if (g->scrollY & 8) {
-		*y = 0;
+		*y = line;
 		return;
 	}
-	int fixed = g->scrollY & 7;
-	if (line <= fixed) {
+	int first = g->scrollY & 7;
+	int fixedLines = 8 - first;
+	if (line < fixedLines) {
 		*x = 0;
-		*y = 0xF8 + line + 7 - fixed;
+		*y = 0xF8 + first + line;
 	} else {
-		*y = line;
+		*y = line - fixedLines;
 	}
 }
 

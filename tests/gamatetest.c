@@ -110,6 +110,66 @@ static void testVideo(void) {
 	gamateFree(&g);
 }
 
+static void setVideoPixel(struct Gamate* g, unsigned x, unsigned y, uint8_t shade) {
+	size_t byte = ((size_t) y * 0x20 + (x >> 3)) << 1;
+	uint8_t mask = 0x80 >> (x & 7);
+	if (shade & 1) g->vram[byte] |= mask;
+	if (shade & 2) g->vram[byte | 1] |= mask;
+}
+
+static void testVideoWindows(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+
+	// Y=$C8/$D8/$E8/$F8 selects the ordinary row-zero origin, not row zero for every line.
+	setVideoPixel(&g, 0, 0, 1);
+	setVideoPixel(&g, 0, 1, 2);
+	for (unsigned y = 0xC8; y <= 0xF8; y += 0x10) {
+		g.scrollY = y;
+		gamateRenderSnapshot(&g);
+		assert(g.frameBuffer[0] == 1 && g.frameBuffer[GAMATE_WIDTH] == 2);
+	}
+
+	// F0 exposes all eight fixed rows F8-FF, then resumes at row zero. The fixed area ignores X.
+	memset(g.vram, 0, sizeof(g.vram));
+	setVideoPixel(&g, 0, 0xF8, 1);
+	setVideoPixel(&g, 0, 0xFF, 2);
+	setVideoPixel(&g, 8, 0x00, 3);
+	g.scrollX = 8;
+	g.scrollY = 0xF0;
+	gamateRenderSnapshot(&g);
+	assert(g.frameBuffer[0] == 1);
+	assert(g.frameBuffer[7 * GAMATE_WIDTH] == 2);
+	assert(g.frameBuffer[8 * GAMATE_WIDTH] == 3);
+
+	// F1 exposes seven rows F9-FF, then resumes at row zero.
+	memset(g.vram, 0, sizeof(g.vram));
+	setVideoPixel(&g, 0, 0xF9, 1);
+	setVideoPixel(&g, 0, 0xFF, 2);
+	setVideoPixel(&g, 8, 0x00, 3);
+	g.scrollY = 0xF1;
+	gamateRenderSnapshot(&g);
+	assert(g.frameBuffer[0] == 1);
+	assert(g.frameBuffer[6 * GAMATE_WIDTH] == 2);
+	assert(g.frameBuffer[7 * GAMATE_WIDTH] == 3);
+
+	// LCDcon W independently replaces the top 16 rows with D0-DF and disables X scroll there,
+	// including when Y uses one of the special values above.
+	memset(g.vram, 0, sizeof(g.vram));
+	setVideoPixel(&g, 0, 0xD0, 3);
+	setVideoPixel(&g, 0, 0xF8, 1);
+	g.window = true;
+	g.scrollY = 0xF0;
+	gamateRenderSnapshot(&g);
+	assert(g.frameBuffer[0] == 3);
+	g.window = false;
+	gamateRenderSnapshot(&g);
+	assert(g.frameBuffer[0] == 1);
+	gamateFree(&g);
+}
+
 static void testTimingAndState(void) {
 	struct Gamate g;
 	gamateInit(&g);
@@ -355,6 +415,7 @@ static void testAudio(void) {
 int main(void) {
 	testMemory();
 	testVideo();
+	testVideoWindows();
 	testTimingAndState();
 	testIrq();
 	testIrqMaskTiming();
