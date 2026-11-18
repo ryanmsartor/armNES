@@ -5,11 +5,22 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static uint32_t pictureHash(const struct Gamate* g) {
 	uint32_t hash = 2166136261U;
 	for (size_t i = 0; i < GAMATE_WIDTH * GAMATE_HEIGHT; i++) {
 		hash ^= g->frameBuffer[i];
+		hash *= 16777619U;
+	}
+	return hash;
+}
+
+static uint32_t byteHash(const void* data, size_t size) {
+	uint32_t hash = 2166136261U;
+	const uint8_t* bytes = data;
+	while (size--) {
+		hash ^= *bytes++;
 		hash *= 16777619U;
 	}
 	return hash;
@@ -120,8 +131,29 @@ int main(int argc, char** argv) {
 		gamateFree(&g);
 		return 1;
 	}
+	printf("entry state: master=%llu frame=%u irq=%u lcd=%u/%u RAM=%08X VRAM=%08X "
+		"scroll=%u/%u lcdcon=%u%u%u%u%u\n",
+		(unsigned long long) g.masterClocks, g.frameClocks, g.irqClocks, g.lcdRowEvent, g.lcdClock,
+		byteHash(g.ram, sizeof(g.ram)), byteHash(g.vram, sizeof(g.vram)), g.scrollX, g.scrollY,
+		g.incrementRow, g.window, g.swapPlanes, g.displayBlank, g.displayStopped);
+	// Diagnostic experiment only: remove the oscillator/display phase inherited from the BIOS while
+	// preserving CPU, RAM, VRAM, registers, and cartridge state. Normal emulation never does this.
+	if (getenv("GAMATEBOOT_NORMALIZE_ENTRY_PHASE")) {
+		g.masterClocks = g.frameClocks = g.irqClocks = 0;
+		g.lcdClock = g.lcdRowEvent = 0;
+		g.samplePhase = 0;
+		g.irq = false;
+		memset(&g.ay, 0, sizeof(g.ay));
+		g.ay.noiseLfsr = 0x1FFFF;
+		g.ay.noiseLevel = true;
+		g.ay.envelopeStep = 15;
+		memset(g.lcdAccum, 0, sizeof(g.lcdAccum));
+		memset(g.frameBuffer, 0, sizeof(g.frameBuffer));
+		puts("entry phase normalized for diagnostic comparison");
+	}
 
 	unsigned nonblank = 0, audible = 0;
+	unsigned firstAudible = 0, firstControllerRead = 0, firstPressedRead = 0;
 	unsigned peak = 0;
 	int16_t audio[2048 * 2];
 	gamateSetAudio(&g, audio, 2048, 48000);
@@ -129,6 +161,8 @@ int main(int argc, char** argv) {
 	uint16_t previousPc = 0xFFFF;
 	for (unsigned frame = 1; frame <= framesWanted; frame++) {
 		g.buttons = buttonsForFrame(frame);
+		uint64_t controllerReadsBefore = g.diagnostics.controllerReads;
+		uint64_t pressedReadsBefore = g.diagnostics.pressedControllerReads;
 		g.frameDone = false;
 		g.audioCount = 0;
 		while (!g.frameDone) {
@@ -150,7 +184,12 @@ int main(int argc, char** argv) {
 			if (value) hasAudio = true;
 			if ((unsigned) value > peak) peak = value;
 		}
-		if (hasAudio) audible++;
+		if (hasAudio) {
+			audible++;
+			if (!firstAudible) firstAudible = frame;
+		}
+		if (!firstControllerRead && g.diagnostics.controllerReads != controllerReadsBefore) firstControllerRead = frame;
+		if (!firstPressedRead && g.diagnostics.pressedControllerReads != pressedReadsBefore) firstPressedRead = frame;
 		if (frame == 1 || frame == 60 || frame == framesWanted) {
 			printf("frame %u: video=%08X audio=%08X/%zu PC=$%04X bank=%u/%u\n", frame,
 				pictureHash(&g), audioHash(audio, audioFrames), audioFrames, g.cpu.pc, g.firstBank, g.bank);
@@ -175,6 +214,8 @@ int main(int argc, char** argv) {
 	printf("controller reads: %llu (%llu while pressed)\n",
 		(unsigned long long) g.diagnostics.controllerReads,
 		(unsigned long long) g.diagnostics.pressedControllerReads);
+	printf("first events: audio=%u controller-read=%u pressed-read=%u\n",
+		firstAudible, firstControllerRead, firstPressedRead);
 	if (g.diagnostics.unsupportedOpcodes) {
 		fprintf(stderr, "unsupported opcode $%02X at $%04X (%llu total)\n",
 			g.diagnostics.lastUnsupportedOpcode, g.diagnostics.lastUnsupportedPc,

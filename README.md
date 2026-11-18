@@ -333,6 +333,10 @@ For targeted headless runs, `GAMATEBOOT_PRESS="frame:mask:frames,..."` supplies 
 `gamateboot` after cartridge entry. Mask bits follow the Gamate register: Up `01`, Down `02`, Left
 `04`, Right `08`, A `10`, B `20`, Start `40`, Select `80`. For example, `120:0x40:6` holds Start for
 six frames beginning at frame 120.
+
+`GAMATEBOOT_NORMALIZE_ENTRY_PHASE=1` is a diagnostic experiment that resets inherited clock, LCD,
+IRQ, and AY oscillator phase at `$6020` while preserving machine memory and registers. It is useful
+for isolating BIOS timing differences and is never part of normal emulation.
 `nesrun` takes these environment variables:
 
 | Variable | Effect |

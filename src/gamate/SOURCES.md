@@ -236,11 +236,26 @@ into the repository, build output, tests, or releases.
   attract/demo sequence used all channels. A 30-frame Start pulse at frame 120 was seen by 61 of the
   game's frequent controller reads, entered gameplay under both BIOS revisions, and produced audio
   in 281/400 frames with all three channels active. An A-only pulse did not leave the title flow.
-- Famous 7, One Million Whys, and QuizFighter produced audio in only 24 frames and remain targeted
-  investigation candidates rather than automatic failures. Final video hashes agreed between BIOSes for 56 of 58 cartridges;
-  Mini Golf and Money Maze differed. Audio hashes generally differed because the two BIOS boot
-  paths enter cartridge execution at different master-clock/sample phases. These differences are
-  retained as leads rather than treated as proof of an emulation defect.
+- Famous 7, One Million Whys, and QuizFighter's identical 24/300 audio result was traced to the same
+  exact first-audio frame, 277, under both BIOS revisions. This strongly suggests a shared title
+  sequence or engine timing (an inference from matching behavior, not a source-derived claim). At
+  700 unattended frames they were audible for 424, 276, and 351 frames respectively, with multiple
+  AY channels active; at 1,000 frames the counts rose to 724, 576, and 651. Famous 7 and QuizFighter
+  do not begin controller polling until frame 564; a 30-frame Start pulse at frame 600 was observed
+  and changed their subsequent execution. One Million Whys polls from frame 2 and observed the same
+  pulse, but remained in its current flow. These limited 300-frame results are therefore title
+  sequencing, not evidence of an audio fault.
+- The two BIOS-dependent final-video cases, Mini Golf and Money Maze, were isolated to inherited
+  entry phase rather than memory, mapper, or rendering nondeterminism. At `$6020`, both BIOSes leave
+  identical RAM and VRAM hashes, scroll/LCD control, and IRQ phase. The BIT BIOS arrives 29 CPU
+  cycles (58 master clocks) later, moving the progressive LCD from row-event/clock `362/128` to
+  `363/24` and shifting frame and AY oscillator/sample phase. A diagnostic-only experiment reset
+  clock, LCD, IRQ, and AY phase at entry while preserving CPU, memory, registers, and cartridge
+  state. Under that normalization, each game produced identical video/audio hashes, PCs, and
+  activity counters across BIOSes through frame 300. The ordinary differing hashes therefore sample
+  slightly different execution instants because the diagnostic numbers frames from cartridge entry;
+  normal emulation continues to preserve each real BIOS path's timing. Audio hashes for other games
+  commonly differ for the same phase reason.
 
 ## Still needed
 
