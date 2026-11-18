@@ -532,6 +532,20 @@ static void testCpuBusAccesses(void) {
 	g.ram[0x1FC] = 0x23; g.ram[0x1FD] = 0xE1;
 	assert(gamateCpuStep(&g) == 6 && g.cpu.pc == 0xE124 && g.cpu.s == 0xFD);
 	assert(g.openBus == 0x6D);
+
+	// NMOS JMP indirect wraps the vector's high-byte read within the pointer's original page.
+	g.bios[0] = 0x6C; g.bios[1] = 0xFF; g.bios[2] = 0x10; // JMP ($10FF)
+	g.ram[0x0FF] = 0x34; g.ram[0] = 0xE2; g.ram[0x100] = 0x99;
+	g.cpu.pc = 0xE000;
+	assert(gamateCpuStep(&g) == 5 && g.cpu.pc == 0xE234 && g.openBus == 0xE2);
+
+	// Power reset performs seven reads, including three non-writing stack cycles, and ends with the
+	// high reset-vector byte on open bus.
+	g.bios[0xFFC] = 0x34; g.bios[0xFFD] = 0xE2;
+	gamateReset(&g);
+	assert(g.cpu.pc == 0xE234 && g.cpu.s == 0xFD && g.cpu.cycles == 7);
+	assert(g.ram[0] == 0xFF && g.ram[0x100] == 0xFF && g.ram[0x1FE] == 0xFF && g.ram[0x1FF] == 0xFF);
+	assert(g.openBus == 0xE2);
 	gamateFree(&g);
 }
 

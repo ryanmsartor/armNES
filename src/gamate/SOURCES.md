@@ -151,6 +151,12 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
   BRK reads its padding byte; and hardware IRQ/NMI perform their two replaced opcode reads. Tests
   verify PHA's next-opcode open-bus value and RTS's final return-address read as well as stack/PC
   results. Exact interleaving with peripheral clocks still requires a per-cycle CPU architecture.
+- Also used for: completing the official NMOS bus-sequence audit. Power-on reset now performs two
+  discarded PC reads, three non-writing stack reads/decrements, and two vector reads; a focused test
+  verifies the resulting PC, S, cycle count, untouched stack memory, and open bus. The existing NMOS
+  indirect-JMP page-wrap read now has an explicit regression test. All documented official NMOS
+  instruction/addressing classes are represented; undocumented opcodes, an externally asserted warm
+  reset, and NCR-specific deviations remain outside this evidence-backed audit.
 
 ### Masswerk 6502 instruction set
 

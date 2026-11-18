@@ -133,7 +133,16 @@ static unsigned interrupt(struct Gamate* g, uint16_t vector, bool software) {
 void gamateCpuReset(struct Gamate* g) {
 	struct GamateCpu* c = &g->cpu;
 	c->a = c->x = c->y = 0;
-	c->s = 0xFD;
+	// Model the documented power-on reset bus sequence from a zeroed internal CPU state: two
+	// discarded PC reads, three stack reads with decrements, then the reset vector. No stack writes
+	// occur. A warm external-reset input is not currently exposed by the Gamate machine API.
+	c->pc = 0;
+	c->s = 0;
+	read8(g, c->pc);
+	read8(g, c->pc);
+	read8(g, 0x100 | c->s--);
+	read8(g, 0x100 | c->s--);
+	read8(g, 0x100 | c->s--);
 	c->p = I | U;
 	c->pc = read16(g, 0xFFFC);
 	c->cycles = 7;
