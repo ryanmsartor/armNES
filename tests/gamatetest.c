@@ -491,6 +491,15 @@ static void testCpuBusAccesses(void) {
 	g.cpu.pc = 0xE000;
 	g.uartTxBits = 0;
 	assert(gamateCpuStep(&g) == 5 && g.uartTxBits == 1);
+	// LDY abs,X uses the same crossing sequence despite living outside the generic opcode group.
+	g.bios[0] = 0xBC; // LDY $4FFF,X
+	g.cpu.pc = 0xE000;
+	g.uartTxBits = 0;
+	assert(gamateCpuStep(&g) == 5 && g.uartTxBits == 1 && g.cpu.y == 0x50);
+	// STY zp,X reads the unindexed zero-page address before writing the indexed destination.
+	g.bios[0] = 0x94; g.bios[1] = 0x10;
+	g.ram[0x10] = 0xCC; g.cpu.pc = 0xE000; g.cpu.x = 1; g.cpu.y = 0x73;
+	assert(gamateCpuStep(&g) == 4 && g.ram[0x11] == 0x73 && g.openBus == 0xCC);
 
 	// A taken branch reads the fall-through PC, then the target low byte on the old page if the
 	// branch crosses a page. The final discarded read is visible through open bus.
@@ -502,6 +511,27 @@ static void testCpuBusAccesses(void) {
 	// An untaken branch stops after fetching its offset and performs neither discarded read.
 	g.cpu.pc = 0xE0FC; g.cpu.p |= 0x02;
 	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE0FE && g.openBus == 0x02);
+
+	// Two-cycle implied and accumulator instructions discard a fetch of the following opcode.
+	g.bios[0] = 0xEA; g.bios[1] = 0x5A; // NOP, followed by a distinctive bus value
+	g.cpu.pc = 0xE000;
+	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE001 && g.openBus == 0x5A);
+	g.bios[0] = 0x0A; g.bios[1] = 0xA5; // ASL A
+	g.cpu.pc = 0xE000; g.cpu.a = 0x40;
+	assert(gamateCpuStep(&g) == 2 && g.cpu.a == 0x80 && g.openBus == 0xA5);
+
+	// Stack pushes discard-fetch the following opcode before writing. Writes do not replace the
+	// read-driven open-bus value.
+	g.bios[0] = 0x48; g.bios[1] = 0x3C; // PHA
+	g.cpu.pc = 0xE000; g.cpu.s = 0xFD; g.cpu.a = 0xA7;
+	assert(gamateCpuStep(&g) == 3 && g.cpu.s == 0xFC && g.ram[0x1FD] == 0xA7);
+	assert(g.openBus == 0x3C);
+	// RTS performs its last discarded read at the stacked return address before incrementing PC.
+	g.bios[0] = 0x60; g.bios[0x123] = 0x6D;
+	g.cpu.pc = 0xE000; g.cpu.s = 0xFB;
+	g.ram[0x1FC] = 0x23; g.ram[0x1FD] = 0xE1;
+	assert(gamateCpuStep(&g) == 6 && g.cpu.pc == 0xE124 && g.cpu.s == 0xFD);
+	assert(g.openBus == 0x6D);
 	gamateFree(&g);
 }
 

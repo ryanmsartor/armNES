@@ -108,6 +108,11 @@ static uint8_t shift(struct GamateCpu* c, unsigned operation, uint8_t value) {
 
 static unsigned interrupt(struct Gamate* g, uint16_t vector, bool software) {
 	struct GamateCpu* c = &g->cpu;
+	if (!software) {
+		// IRQ/NMI replace an opcode fetch, then repeat it while preparing the stack sequence.
+		read8(g, c->pc);
+		read8(g, c->pc);
+	}
 	push(g, c->pc >> 8);
 	push(g, c->pc);
 	push(g, (c->p & ~B) | U | (software ? B : 0));
@@ -228,6 +233,19 @@ static unsigned branch(struct Gamate* g, bool take) {
 	return 3 + crossed;
 }
 
+static bool hasImpliedOpcodeFetch(uint8_t opcode) {
+	if ((opcode & 0x9F) == 0x0A) return true; // ASL/ROL/LSR/ROR accumulator
+	switch (opcode) {
+	case 0x18: case 0x38: case 0x58: case 0x78: // flag operations
+	case 0x88: case 0x8A: case 0x98: case 0x9A: // decrement/transfer
+	case 0xA8: case 0xAA: case 0xB8: case 0xBA: // transfer/flag operations
+	case 0xC8: case 0xCA: case 0xD8: case 0xE8: case 0xEA: case 0xF8:
+		return true;
+	default:
+		return false;
+	}
+}
+
 unsigned gamateCpuStep(struct Gamate* g) {
 	struct GamateCpu* c = &g->cpu;
 	g->diagnostics.instructions++;
@@ -244,6 +262,7 @@ unsigned gamateCpuStep(struct Gamate* g) {
 		return cycles;
 	}
 	uint8_t opcode = fetch(g);
+	if (hasImpliedOpcodeFetch(opcode)) read8(g, c->pc);
 	bool oldIrqMask = c->p & I;
 	bool delayedIrqMask = opcode == 0x28 || opcode == 0x58 || opcode == 0x78; // PLP, CLI, SEI
 	unsigned cycles = 2;
@@ -251,23 +270,26 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	else if ((opcode & 3) == 2 && opcode != 0x8A && opcode != 0x9A && opcode != 0xAA &&
 			opcode != 0xBA && opcode != 0xCA && opcode != 0xEA) cycles = group2(g, opcode);
 	else switch (opcode) {
-	case 0x00: c->pc++; cycles = interrupt(g, 0xFFFE, true); break;
-	case 0x08: push(g, c->p | B | U); cycles = 3; break;
+	case 0x00: read8(g, c->pc++); cycles = interrupt(g, 0xFFFE, true); break;
+	case 0x08: read8(g, c->pc); push(g, c->p | B | U); cycles = 3; break;
 	case 0x10: cycles = branch(g, !(c->p & N)); break;
 	case 0x18: c->p &= ~C; break;
-	case 0x20: { uint16_t target = fetch16(g); uint16_t ret = c->pc - 1; push(g, ret >> 8); push(g, ret); c->pc = target; cycles = 6; break; }
+	case 0x20: { uint8_t lo = fetch(g); uint16_t ret = c->pc; read8(g, 0x100 | c->s);
+		push(g, ret >> 8); push(g, ret); c->pc = lo | (uint16_t) fetch(g) << 8; cycles = 6; break; }
 	case 0x24: { uint8_t v = read8(g, fetch(g)); flag(c, Z, !(c->a & v)); flag(c, V, v & 0x40); flag(c, N, v & 0x80); cycles = 3; break; }
-	case 0x28: c->p = (pull(g) | U) & ~B; cycles = 4; break;
+	case 0x28: read8(g, c->pc); read8(g, 0x100 | c->s); c->p = (pull(g) | U) & ~B; cycles = 4; break;
 	case 0x2C: { uint8_t v = read8(g, fetch16(g)); flag(c, Z, !(c->a & v)); flag(c, V, v & 0x40); flag(c, N, v & 0x80); cycles = 4; break; }
 	case 0x30: cycles = branch(g, c->p & N); break;
 	case 0x38: c->p |= C; break;
-	case 0x40: c->p = (pull(g) | U) & ~B; { uint8_t lo = pull(g); c->pc = lo | (uint16_t) pull(g) << 8; } cycles = 6; break;
-	case 0x48: push(g, c->a); cycles = 3; break;
+	case 0x40: read8(g, c->pc); read8(g, 0x100 | c->s); c->p = (pull(g) | U) & ~B;
+		{ uint8_t lo = pull(g); c->pc = lo | (uint16_t) pull(g) << 8; } cycles = 6; break;
+	case 0x48: read8(g, c->pc); push(g, c->a); cycles = 3; break;
 	case 0x4C: c->pc = fetch16(g); cycles = 3; break;
 	case 0x50: cycles = branch(g, !(c->p & V)); break;
 	case 0x58: c->p &= ~I; break;
-	case 0x60: { uint8_t lo = pull(g); c->pc = (lo | (uint16_t) pull(g) << 8) + 1; cycles = 6; break; }
-	case 0x68: c->a = pull(g); zn(c, c->a); cycles = 4; break;
+	case 0x60: { read8(g, c->pc); read8(g, 0x100 | c->s); uint8_t lo = pull(g);
+		uint16_t ret = lo | (uint16_t) pull(g) << 8; read8(g, ret); c->pc = ret + 1; cycles = 6; break; }
+	case 0x68: read8(g, c->pc); read8(g, 0x100 | c->s); c->a = pull(g); zn(c, c->a); cycles = 4; break;
 	case 0x6C: { uint16_t p = fetch16(g); c->pc = read8(g, p) | (uint16_t) read8(g, (p & 0xFF00) | (uint8_t) (p + 1)) << 8; cycles = 5; break; }
 	case 0x70: cycles = branch(g, c->p & V); break;
 	case 0x78: c->p |= I; break;
@@ -276,7 +298,7 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	case 0x8A: c->a = c->x; zn(c, c->a); break;
 	case 0x8C: write8(g, fetch16(g), c->y); cycles = 4; break;
 	case 0x90: cycles = branch(g, !(c->p & C)); break;
-	case 0x94: write8(g, (uint8_t) (fetch(g) + c->x), c->y); cycles = 4; break;
+	case 0x94: { uint8_t zp = fetch(g); read8(g, zp); write8(g, (uint8_t) (zp + c->x), c->y); cycles = 4; break; }
 	case 0x98: c->a = c->y; zn(c, c->a); break;
 	case 0x9A: c->s = c->x; break;
 	case 0xA0: c->y = fetch(g); zn(c, c->y); break;
@@ -285,10 +307,12 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	case 0xAA: c->x = c->a; zn(c, c->x); break;
 	case 0xAC: c->y = read8(g, fetch16(g)); zn(c, c->y); cycles = 4; break;
 	case 0xB0: cycles = branch(g, c->p & C); break;
-	case 0xB4: c->y = read8(g, (uint8_t) (fetch(g) + c->x)); zn(c, c->y); cycles = 4; break;
+	case 0xB4: { uint8_t zp = fetch(g); read8(g, zp); c->y = read8(g, (uint8_t) (zp + c->x)); zn(c, c->y); cycles = 4; break; }
 	case 0xB8: c->p &= ~V; break;
 	case 0xBA: c->x = c->s; zn(c, c->x); break;
-	case 0xBC: { bool x; c->y = read8(g, indexed(fetch16(g), c->x, &x)); zn(c, c->y); cycles = 4 + x; break; }
+	case 0xBC: { bool crossed; uint16_t base = fetch16(g); uint16_t address = indexed(base, c->x, &crossed);
+		if (crossed) read8(g, uncorrectedPage(base, address));
+		c->y = read8(g, address); zn(c, c->y); cycles = 4 + crossed; break; }
 	case 0xC0: compare(c, c->y, fetch(g)); break;
 	case 0xC4: compare(c, c->y, read8(g, fetch(g))); cycles = 3; break;
 	case 0xC8: c->y++; zn(c, c->y); break;

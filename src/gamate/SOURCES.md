@@ -137,10 +137,20 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
   base-address read; page-crossing indexed loads read once from the uncorrected page; indexed stores
   and indexed read-modify-write instructions always perform that preliminary read. Tests cross from
   `$4FFF` to `$5000` and verify that the otherwise-discarded `$4F00` read clocks the UART before the
-  corrected LCD-space access. As above, this is the documented NMOS baseline pending an NCR trace.
+  corrected LCD-space access. Dedicated tests also cover the separately decoded LDY/STY indexed
+  forms, including the zero-page preliminary read's open-bus result. As above, this is the documented
+  NMOS baseline pending an NCR trace.
 - Also used for: branch bus sequencing. A taken branch reads the fall-through PC; a page-crossing
   branch then reads the target low byte with the old page before fetching from the corrected target.
   Tests verify the cycle count, target, and open-bus value for taken page-crossing and untaken cases.
+- Also used for: the discarded next-opcode fetch made by two-cycle implied and accumulator
+  instructions. Focused NOP and accumulator-ASL tests verify that PC is unchanged by the discarded
+  fetch while its byte becomes the machine's open-bus value.
+- Also used for: stack and control-flow bus order. PHP/PHA, PLP/PLA, RTI, and RTS now include their
+  discarded program/stack reads; JSR fetches its target high byte after pushing the return address;
+  BRK reads its padding byte; and hardware IRQ/NMI perform their two replaced opcode reads. Tests
+  verify PHA's next-opcode open-bus value and RTS's final return-address read as well as stack/PC
+  results. Exact interleaving with peripheral clocks still requires a per-cycle CPU architecture.
 
 ### Masswerk 6502 instruction set
 
