@@ -193,6 +193,9 @@ static unsigned group2(struct Gamate* g, uint8_t opcode) {
 		return mode == 1 ? 3 : mode == 3 ? 4 : mode == 5 ? 4 : 4 + crossed;
 	}
 	value = read8(g, address);
+	// An NMOS 6502 RMW cycle writes the unmodified value before writing the result. This is visible
+	// to Gamate peripherals whose action is triggered by an access rather than the data value.
+	write8(g, address, value);
 	if (operation <= 3) value = shift(c, operation, value);
 	else if (operation == 6) { value--; zn(c, value); }
 	else { value++; zn(c, value); }

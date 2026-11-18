@@ -121,6 +121,19 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
   vectors, status flags, documented cycle counts, level-sensitive IRQ masking, and completion of the
   current instruction before interrupt service.
 
+### MOS Technology, MCS6500 Microcomputer Family Hardware Manual
+
+- Scan: <http://archive.6502.org/books/mcs6500_family_hardware_manual.pdf>
+- Status: original manufacturer hardware manual; Appendix A gives the address/data-bus activity for
+  each instruction cycle.
+- Used for: the NMOS read-modify-write sequence, which reads the operand, writes its original value,
+  then writes the modified value. This differs from later CMOS parts and is observable with
+  access-triggered Gamate registers.
+- Implementation impact: memory ASL/ROL/LSR/ROR/DEC/INC now perform both NMOS writes. A focused test
+  targets `$4C00`, where the operand read and both writes must produce three UART clocks. The NCR
+  65CX02 has not been logic-analyzer-traced for this sequence, so this is explicitly an NMOS
+  baseline derived from the chip's otherwise measured NMOS-like behavior.
+
 ### Masswerk 6502 instruction set
 
 - URL: <https://www.masswerk.at/6502/6502_instruction_set.html>

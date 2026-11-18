@@ -465,6 +465,22 @@ static void testCpuDecimal(void) {
 	gamateFree(&g);
 }
 
+static void testCpuBusAccesses(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	bios[0] = 0x0E; bios[1] = 0x00; bios[2] = 0x4C; // ASL $4C00
+	bios[0xFFC] = 0x00; bios[0xFFD] = 0xE0;
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+	g.cpu.pc = 0xE000;
+	gamateWrite(&g, 0x4400, 0xA0);
+	assert(g.uartTxBits == 0 && g.uartTxLine);
+	// NMOS RMW is read, write old, write new: all three accesses clock this Gamate register.
+	assert(gamateCpuStep(&g) == 6);
+	assert(g.uartTxBits == 3 && !g.uartTxLine);
+	gamateFree(&g);
+}
+
 static void testAudio(void) {
 	struct Gamate g;
 	gamateInit(&g);
@@ -537,6 +553,7 @@ int main(void) {
 	testIrqMaskTiming();
 	testCpu();
 	testCpuDecimal();
+	testCpuBusAccesses();
 	testAudio();
 	return 0;
 }
