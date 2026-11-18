@@ -220,8 +220,12 @@ static unsigned branch(struct Gamate* g, bool take) {
 	int8_t offset = (int8_t) fetch(g);
 	if (!take) return 2;
 	uint16_t old = g->cpu.pc;
-	g->cpu.pc += offset;
-	return 3 + (((old ^ g->cpu.pc) & 0x100) != 0);
+	uint16_t target = old + offset;
+	read8(g, old); // discarded fall-through opcode fetch
+	bool crossed = (old ^ target) & 0x100;
+	if (crossed) read8(g, uncorrectedPage(old, target));
+	g->cpu.pc = target;
+	return 3 + crossed;
 }
 
 unsigned gamateCpuStep(struct Gamate* g) {

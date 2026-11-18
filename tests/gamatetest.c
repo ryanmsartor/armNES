@@ -491,6 +491,17 @@ static void testCpuBusAccesses(void) {
 	g.cpu.pc = 0xE000;
 	g.uartTxBits = 0;
 	assert(gamateCpuStep(&g) == 5 && g.uartTxBits == 1);
+
+	// A taken branch reads the fall-through PC, then the target low byte on the old page if the
+	// branch crosses a page. The final discarded read is visible through open bus.
+	g.bios[0] = 0x22;
+	g.bios[0x0FC] = 0xD0; g.bios[0x0FD] = 0x02; // BNE $E100 from $E0FC
+	g.bios[0x0FE] = 0x11;
+	g.cpu.pc = 0xE0FC; g.cpu.p &= (uint8_t) ~0x02;
+	assert(gamateCpuStep(&g) == 4 && g.cpu.pc == 0xE100 && g.openBus == 0x22);
+	// An untaken branch stops after fetching its offset and performs neither discarded read.
+	g.cpu.pc = 0xE0FC; g.cpu.p |= 0x02;
+	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE0FE && g.openBus == 0x02);
 	gamateFree(&g);
 }
 

@@ -138,6 +138,9 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
   and indexed read-modify-write instructions always perform that preliminary read. Tests cross from
   `$4FFF` to `$5000` and verify that the otherwise-discarded `$4F00` read clocks the UART before the
   corrected LCD-space access. As above, this is the documented NMOS baseline pending an NCR trace.
+- Also used for: branch bus sequencing. A taken branch reads the fall-through PC; a page-crossing
+  branch then reads the target low byte with the old page before fetching from the corrected target.
+  Tests verify the cycle count, target, and open-bus value for taken page-crossing and untaken cases.
 
 ### Masswerk 6502 instruction set
 
