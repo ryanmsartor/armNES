@@ -133,6 +133,11 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
   targets `$4C00`, where the operand read and both writes must produce three UART clocks. The NCR
   65CX02 has not been logic-analyzer-traced for this sequence, so this is explicitly an NMOS
   baseline derived from the chip's otherwise measured NMOS-like behavior.
+- Also used for: indexed-address bus sequencing. Zero-page indexed modes perform their preliminary
+  base-address read; page-crossing indexed loads read once from the uncorrected page; indexed stores
+  and indexed read-modify-write instructions always perform that preliminary read. Tests cross from
+  `$4FFF` to `$5000` and verify that the otherwise-discarded `$4F00` read clocks the UART before the
+  corrected LCD-space access. As above, this is the documented NMOS baseline pending an NCR trace.
 
 ### Masswerk 6502 instruction set
 

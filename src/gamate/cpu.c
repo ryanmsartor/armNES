@@ -41,6 +41,9 @@ static uint16_t indexed(uint16_t base, uint8_t index, bool* crossed) {
 	*crossed = (base ^ result) & 0x100;
 	return result;
 }
+static uint16_t uncorrectedPage(uint16_t base, uint16_t indexedAddress) {
+	return (base & 0xFF00) | (indexedAddress & 0x00FF);
+}
 
 static void compare(struct GamateCpu* c, uint8_t left, uint8_t right) {
 	flag(c, C, left >= right);
@@ -140,15 +143,22 @@ static unsigned group1(struct Gamate* g, uint8_t opcode) {
 	uint8_t value = 0;
 	bool crossed = false, store = operation == 4;
 	switch (mode) {
-	case 0: { uint8_t zp = fetch(g) + c->x; address = read8(g, zp) | (uint16_t) read8(g, (uint8_t) (zp + 1)) << 8; cycles = 6; break; }
+	case 0: { uint8_t zp = fetch(g); read8(g, zp); zp += c->x;
+		address = read8(g, zp) | (uint16_t) read8(g, (uint8_t) (zp + 1)) << 8; cycles = 6; break; }
 	case 1: address = fetch(g); cycles = 3; break;
 	case 2: value = fetch(g); cycles = 2; break;
 	case 3: address = fetch16(g); cycles = 4; break;
 	case 4: { uint8_t zp = fetch(g); uint16_t base = read8(g, zp) | (uint16_t) read8(g, (uint8_t) (zp + 1)) << 8;
-		address = indexed(base, c->y, &crossed); cycles = store ? 6 : 5 + crossed; break; }
-	case 5: address = (uint8_t) (fetch(g) + c->x); cycles = 4; break;
-	case 6: address = indexed(fetch16(g), c->y, &crossed); cycles = store ? 5 : 4 + crossed; break;
-	default: address = indexed(fetch16(g), c->x, &crossed); cycles = store ? 5 : 4 + crossed; break;
+		address = indexed(base, c->y, &crossed);
+		if (store || crossed) read8(g, uncorrectedPage(base, address));
+		cycles = store ? 6 : 5 + crossed; break; }
+	case 5: { uint8_t zp = fetch(g); read8(g, zp); address = (uint8_t) (zp + c->x); cycles = 4; break; }
+	case 6: { uint16_t base = fetch16(g); address = indexed(base, c->y, &crossed);
+		if (store || crossed) read8(g, uncorrectedPage(base, address));
+		cycles = store ? 5 : 4 + crossed; break; }
+	default: { uint16_t base = fetch16(g); address = indexed(base, c->x, &crossed);
+		if (store || crossed) read8(g, uncorrectedPage(base, address));
+		cycles = store ? 5 : 4 + crossed; break; }
 	}
 	if (store) {
 		if (mode == 2) return 2; // $89 is not an NMOS STA instruction
@@ -184,8 +194,11 @@ static unsigned group2(struct Gamate* g, uint8_t opcode) {
 	}
 	if (mode == 1) address = fetch(g);
 	else if (mode == 3) address = fetch16(g);
-	else if (mode == 5) address = (uint8_t) (fetch(g) + ((operation == 4 || operation == 5) ? c->y : c->x));
-	else if (mode == 7 && operation != 4) address = indexed(fetch16(g), operation == 5 ? c->y : c->x, &crossed);
+	else if (mode == 5) { uint8_t zp = fetch(g); read8(g, zp);
+		address = (uint8_t) (zp + ((operation == 4 || operation == 5) ? c->y : c->x)); }
+	else if (mode == 7 && operation != 4) { uint16_t base = fetch16(g);
+		address = indexed(base, operation == 5 ? c->y : c->x, &crossed);
+		if (operation != 5 || crossed) read8(g, uncorrectedPage(base, address)); }
 	else return unsupported(g, opcode);
 	if (operation == 4) { write8(g, address, c->x); return mode == 3 ? 4 : 3 + (mode == 5); }
 	if (operation == 5) {

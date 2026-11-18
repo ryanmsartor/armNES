@@ -478,6 +478,19 @@ static void testCpuBusAccesses(void) {
 	// NMOS RMW is read, write old, write new: all three accesses clock this Gamate register.
 	assert(gamateCpuStep(&g) == 6);
 	assert(g.uartTxBits == 3 && !g.uartTxLine);
+
+	// Page-crossing indexed reads first access the uncorrected page. Here LDA's dummy read clocks
+	// UART at $4F00 before the corrected operand read reaches LCD register $5000.
+	g.bios[0] = 0xBD; g.bios[1] = 0xFF; g.bios[2] = 0x4F; // LDA $4FFF,X
+	g.cpu.pc = 0xE000; g.cpu.x = 1;
+	g.uartTxBits = 0;
+	assert(gamateCpuStep(&g) == 5 && g.uartTxBits == 1);
+
+	// Indexed stores always make the preliminary read, whether or not software uses its value.
+	g.bios[0] = 0x9D; // STA $4FFF,X
+	g.cpu.pc = 0xE000;
+	g.uartTxBits = 0;
+	assert(gamateCpuStep(&g) == 5 && g.uartTxBits == 1);
 	gamateFree(&g);
 }
 
