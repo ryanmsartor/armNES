@@ -50,6 +50,7 @@ static void testUart(void) {
 	struct Gamate g;
 	gamateInit(&g);
 	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	bios[0xFFA] = 0x00; bios[0xFFB] = 0xE2; // NMI vector $E200
 	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
 	assert(gamateRead(&g, 0x4800) == 0 && !g.uartTxLine);
 
@@ -77,8 +78,40 @@ static void testUart(void) {
 	assert(gamateLoadState(&g, state, stateSize));
 	assert(g.uartTx == 0x80 && g.uartTxBits == 1 && g.uartTxLine);
 	free(state);
+
+	// The receiver shifts MSB-first and raises NMI after the eighth external clock, even while I is
+	// set. NMI has priority over a simultaneously pending IRQ and does not clear the IRQ timer.
+	for (int bit = 7; bit >= 0; bit--) {
+		gamateUartReceiveBit(&g, (0xA5 >> bit) & 1);
+		assert(g.nmi == (bit == 0));
+	}
+	assert(gamateRead(&g, 0x4800) == 0xA5 && g.uartRxBits == 0);
+	g.irq = true;
+	g.irqClocks = 1234;
+	g.cpu.p |= 0x04;
+	g.cpu.irqMask = true;
+	assert(gamateCpuStep(&g) == 7 && g.cpu.pc == 0xE200);
+	assert(!g.nmi && g.irq && g.irqClocks == 1234);
+	assert(g.diagnostics.nmisTaken == 1 && g.diagnostics.irqsTaken == 0);
+	assert((g.ram[0x1FB] & 0x30) == 0x20);
+
+	// A partial receive byte is machine state, not diagnostics.
+	gamateUartReceiveBit(&g, true);
+	state = malloc(stateSize);
+	assert(state && gamateSaveState(&g, state, stateSize));
+	g.uartRx = g.uartRxBits = 0; g.nmi = false;
+	assert(gamateLoadState(&g, state, stateSize));
+	assert(g.uartRxBits == 1 && (g.uartRx & 1));
+	// Completing that byte also preserves the pending NMI until the CPU accepts it.
+	for (unsigned bit = 0; bit < 7; bit++) gamateUartReceiveBit(&g, false);
+	assert(g.uartRxBits == 0 && g.nmi);
+	assert(gamateSaveState(&g, state, stateSize));
+	g.nmi = false;
+	assert(gamateLoadState(&g, state, stateSize) && g.nmi);
+	free(state);
 	gamateReset(&g);
-	assert(g.uartTx == 0 && g.uartRx == 0 && g.uartTxBits == 0 && !g.uartTxLine);
+	assert(g.uartTx == 0 && g.uartRx == 0 && g.uartTxBits == 0 && g.uartRxBits == 0);
+	assert(!g.uartTxLine && !g.nmi);
 	gamateFree(&g);
 }
 

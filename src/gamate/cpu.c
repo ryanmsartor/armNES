@@ -111,6 +111,8 @@ static unsigned interrupt(struct Gamate* g, uint16_t vector, bool software) {
 		g->irq = false;
 		g->irqClocks = 0;
 		if (!software) g->diagnostics.irqsTaken++;
+	} else if (vector == 0xFFFA) {
+		g->diagnostics.nmisTaken++;
 	}
 	return 7;
 }
@@ -205,6 +207,12 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	struct GamateCpu* c = &g->cpu;
 	g->diagnostics.instructions++;
 	if (c->stopped) return 1;
+	if (g->nmi) {
+		g->nmi = false;
+		unsigned cycles = interrupt(g, 0xFFFA, false);
+		c->cycles += cycles;
+		return cycles;
+	}
 	if (g->irq && !c->irqMask) {
 		unsigned cycles = interrupt(g, 0xFFFE, false);
 		c->cycles += cycles;

@@ -8,7 +8,7 @@
 
 // The LCD receives 72,900 clocks per frame from the 4.433 MHz master oscillator.
 enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768 };
-enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 3 };
+enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 4 };
 
 static uint32_t crc32(const uint8_t* data, size_t size) {
 	uint32_t crc = 0xFFFFFFFF;
@@ -28,7 +28,7 @@ struct GamateState {
 	uint8_t flags;
 	uint8_t protectionFlags, protectionPosition, protectionByte, protectionSequence;
 	uint8_t buttons, openBus;
-	uint8_t uartTx, uartRx, uartTxBits, uartTxLine;
+	uint8_t uartTx, uartRx, uartTxBits, uartRxBits, uartTxLine;
 	uint64_t masterClocks;
 	uint32_t frameClocks, irqClocks;
 	uint8_t ayAddress, ayRegisters[16];
@@ -104,10 +104,10 @@ void gamateReset(struct Gamate* g) {
 	g->frameClocks = 0;
 	g->irqClocks = 0;
 	g->frameDone = false;
-	g->irq = false;
+	g->irq = g->nmi = false;
 	g->buttons = 0xFF; // all controls are active low
 	g->openBus = 0xFF;
-	g->uartTx = g->uartRx = g->uartTxBits = 0;
+	g->uartTx = g->uartRx = g->uartTxBits = g->uartRxBits = 0;
 	g->uartTxLine = false;
 	g->ayAddress = 0;
 	memset(g->ayRegisters, 0, sizeof(g->ayRegisters));
@@ -175,6 +175,14 @@ static void uartClock(struct Gamate* g) {
 		g->uartTxBits++;
 	}
 	g->uartTxLine = g->uartTxBits < 8 && (g->uartTx & 0x80);
+}
+
+void gamateUartReceiveBit(struct Gamate* g, bool bit) {
+	g->uartRx = (uint8_t) (g->uartRx << 1 | bit);
+	if (++g->uartRxBits == 8) {
+		g->uartRxBits = 0;
+		g->nmi = true;
+	}
 }
 
 uint8_t gamateRead(struct Gamate* g, uint16_t address) {
@@ -496,12 +504,13 @@ bool gamateSaveState(const struct Gamate* g, void* data, size_t size) {
 		.vramAddress = g->vramAddress, .scrollX = g->scrollX, .scrollY = g->scrollY,
 		.bank = g->bank, .firstBank = g->firstBank, .mapper = g->mapper,
 		.flags = g->vramPlane | g->incrementRow << 1 | g->window << 2 | g->swapPlanes << 3 |
-			g->displayBlank << 4 | g->displayStopped << 5 | g->irq << 6,
+			g->displayBlank << 4 | g->displayStopped << 5 | g->irq << 6 | g->nmi << 7,
 		.protectionFlags = g->protectionPassed | g->protectionFailed << 1 | g->protectionReply << 2,
 		.protectionPosition = g->protectionPosition, .protectionByte = g->protectionByte,
 		.protectionSequence = g->protectionSequence,
 		.buttons = g->buttons, .openBus = g->openBus,
 		.uartTx = g->uartTx, .uartRx = g->uartRx, .uartTxBits = g->uartTxBits,
+		.uartRxBits = g->uartRxBits,
 		.uartTxLine = g->uartTxLine,
 		.masterClocks = g->masterClocks, .frameClocks = g->frameClocks, .irqClocks = g->irqClocks,
 		.ayAddress = g->ayAddress,
@@ -543,6 +552,7 @@ bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
 	g->displayBlank = state.flags & 16;
 	g->displayStopped = state.flags & 32;
 	g->irq = state.flags & 64;
+	g->nmi = state.flags & 128;
 	g->protectionPassed = state.protectionFlags & 1;
 	g->protectionFailed = state.protectionFlags & 2;
 	g->protectionReply = state.protectionFlags & 4;
@@ -554,6 +564,7 @@ bool gamateLoadState(struct Gamate* g, const void* data, size_t size) {
 	g->uartTx = state.uartTx;
 	g->uartRx = state.uartRx;
 	g->uartTxBits = state.uartTxBits;
+	g->uartRxBits = state.uartRxBits;
 	g->uartTxLine = state.uartTxLine;
 	g->masterClocks = state.masterClocks;
 	g->frameClocks = state.frameClocks;

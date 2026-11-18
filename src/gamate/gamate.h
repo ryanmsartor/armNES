@@ -21,7 +21,7 @@ struct GamateCpu {
 };
 
 struct GamateDiagnostics {
-	uint64_t instructions, unsupportedOpcodes, irqsTaken;
+	uint64_t instructions, unsupportedOpcodes, irqsTaken, nmisTaken;
 	uint64_t ayWrites, lcdWrites, vramWrites, bankWrites;
 	uint64_t ayRegisterWrites[16], ayActiveSamples[3];
 	uint64_t controllerReads, pressedControllerReads;
@@ -56,11 +56,11 @@ struct Gamate {
 	uint8_t protectionPosition, protectionByte, protectionSequence;
 
 	uint8_t buttons, openBus;
-	uint8_t uartTx, uartRx, uartTxBits;
+	uint8_t uartTx, uartRx, uartTxBits, uartRxBits;
 	bool uartTxLine;
 	uint64_t masterClocks;
 	uint32_t frameClocks, irqClocks;
-	bool frameDone, irq;
+	bool frameDone, irq, nmi;
 
 	uint8_t ayAddress;
 	uint8_t ayRegisters[16];
@@ -88,6 +88,8 @@ uint8_t gamateRead(struct Gamate* gamate, uint16_t address);
 void gamateWrite(struct Gamate* gamate, uint16_t address, uint8_t value);
 void gamateRunClocks(struct Gamate* gamate, unsigned clocks);
 void gamateRunFrame(struct Gamate* gamate);
+// Supply one rising receiver-clock edge and its data bit from a future link transport.
+void gamateUartReceiveBit(struct Gamate* gamate, bool bit);
 // Immediate diagnostic preview; normal execution builds the picture progressively in run clocks.
 void gamateRenderSnapshot(struct Gamate* gamate);
 void gamateSetAudio(struct Gamate* gamate, int16_t* output, size_t frameCapacity, unsigned sampleRate);
