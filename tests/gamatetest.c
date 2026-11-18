@@ -85,6 +85,28 @@ static void testVideo(void) {
 	gamateRunClocks(&g, 324);
 	assert(g.lcdRowEvent == 3 && g.frameBuffer[0] == 1);
 	free(lcdState);
+
+	// LCDcon E stops the physical LCD clocks, so scan position freezes rather than advancing without
+	// pixels. Clearing E resumes the interrupted 162-clock row pass.
+	gamateReset(&g);
+	gamateRunClocks(&g, 100);
+	assert(g.lcdClock == 100 && g.lcdRowEvent == 0);
+	gamateWrite(&g, 0x5001, 0x01);
+	gamateRunClocks(&g, 1000);
+	assert(g.lcdClock == 100 && g.lcdRowEvent == 0);
+	gamateWrite(&g, 0x5001, 0x00);
+	gamateRunClocks(&g, 62);
+	assert(g.lcdClock == 0 && g.lcdRowEvent == 1);
+
+	// Blanking does not stop refresh. A plane-0 pass already emitted before N is set remains in the
+	// physical three-pass accumulation, while the two later passes emit zero.
+	gamateReset(&g);
+	gamateWrite(&g, 0x5003, 0);
+	g.vram[0] = g.vram[1] = 0x80;
+	gamateRunClocks(&g, 162);
+	gamateWrite(&g, 0x5001, 0x80);
+	gamateRunClocks(&g, 324);
+	assert(g.lcdRowEvent == 3 && g.frameBuffer[0] == 1);
 	gamateFree(&g);
 }
 
@@ -109,6 +131,133 @@ static void testTimingAndState(void) {
 	assert(gamateLoadState(&g, state, size));
 	assert(g.ram[7] == 0x5A);
 	free(state);
+	gamateFree(&g);
+}
+
+static void testIrq(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	bios[0x000] = 0xEA; // $E000: NOP
+	bios[0x001] = 0x00; // $E001: BRK, used after the hardware-IRQ checks
+	bios[0x100] = 0xEA; // $E100: IRQ handler
+	bios[0xFFC] = 0x00; bios[0xFFD] = 0xE0;
+	bios[0xFFE] = 0x00; bios[0xFFF] = 0xE1;
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+
+	// The measured timer asserts after exactly 32,768 master clocks. Reset starts with IRQ masked.
+	gamateRunClocks(&g, 32767);
+	assert(!g.irq && g.irqClocks == 32767);
+	gamateRunClocks(&g, 1);
+	assert(g.irq && g.irqClocks == 32768);
+	unsigned cycles = gamateCpuStep(&g);
+	assert(cycles == 2 && g.cpu.pc == 0xE001 && g.irq); // masked IRQ does not preempt the NOP
+	gamateRunClocks(&g, cycles * 2);
+	assert(g.irq && g.irqClocks == 32772); // pending level remains asserted while masked
+
+	// Clearing I permits service at the next instruction boundary. The logical vector read clears and
+	// restarts the Gamate timer; exact placement within these seven CPU cycles remains unmeasured.
+	g.cpu.p &= (uint8_t) ~0x04;
+	g.cpu.irqMask = false; // direct test setup bypasses execution of CLI
+	cycles = gamateCpuStep(&g);
+	assert(cycles == 7 && g.cpu.pc == 0xE100 && !g.irq && g.irqClocks == 0);
+	assert(g.diagnostics.irqsTaken == 1 && g.cpu.s == 0xFA);
+	assert(g.ram[0x1FD] == 0xE0 && g.ram[0x1FC] == 0x01);
+	assert((g.ram[0x1FB] & 0x30) == 0x20); // hardware IRQ stacks U set and B clear
+	assert(g.cpu.p & 0x04);                // service sets interrupt disable
+	gamateRunClocks(&g, cycles * 2);
+	assert(g.irqClocks == 14 && !g.irq);
+	gamateRunClocks(&g, 32768 - 14);
+	assert(g.irq && g.irqClocks == 32768);
+
+	// A pending IRQ and its timer phase must survive state serialization.
+	size_t stateSize = gamateStateSize(&g);
+	void* state = malloc(stateSize);
+	assert(state && gamateSaveState(&g, state, stateSize));
+	g.irq = false; g.irqClocks = 3;
+	assert(gamateLoadState(&g, state, stateSize));
+	assert(g.irq && g.irqClocks == 32768);
+	free(state);
+
+	// If the timer expires during an instruction, that instruction completes and IRQ service begins
+	// at the following boundary.
+	gamateReset(&g);
+	g.cpu.p &= (uint8_t) ~0x04;
+	g.irqClocks = 32766;
+	cycles = gamateCpuStep(&g);
+	assert(cycles == 2 && g.cpu.pc == 0xE001 && !g.irq);
+	gamateRunClocks(&g, cycles * 2);
+	assert(g.irq && g.cpu.pc == 0xE001);
+	cycles = gamateCpuStep(&g);
+	assert(cycles == 7 && g.cpu.pc == 0xE100 && g.ram[0x1FD] == 0xE0 && g.ram[0x1FC] == 0x01);
+
+	// BRK uses the IRQ vector and is interpreted as a vector pull by the current hardware model, but
+	// remains a software interrupt for diagnostics and stacks B set.
+	gamateReset(&g);
+	g.cpu.pc = 0xE001;
+	g.irqClocks = 123;
+	cycles = gamateCpuStep(&g);
+	assert(cycles == 7 && g.cpu.pc == 0xE100 && g.irqClocks == 0);
+	assert(g.diagnostics.irqsTaken == 0 && (g.ram[0x1FB] & 0x30) == 0x30);
+
+	g.irq = true; g.irqClocks = 999;
+	gamateReset(&g);
+	assert(!g.irq && g.irqClocks == 0 && g.cpu.pc == 0xE000);
+	gamateFree(&g);
+}
+
+static void testIrqMaskTiming(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	bios[0x000] = 0x58; // $E000: CLI
+	bios[0x001] = 0xEA; // $E001: NOP
+	bios[0x002] = 0xEA; // $E002: NOP (must be replaced by IRQ service)
+	bios[0x010] = 0x78; // $E010: SEI
+	bios[0x020] = 0x28; // $E020: PLP
+	bios[0x021] = 0xEA; // $E021: NOP
+	bios[0x030] = 0x40; // $E030: RTI
+	bios[0x040] = 0xEA; // $E040: RTI target (must be replaced by IRQ service)
+	bios[0x100] = 0xEA; // $E100: IRQ handler
+	bios[0xFFC] = 0x00; bios[0xFFD] = 0xE0;
+	bios[0xFFE] = 0x00; bios[0xFFF] = 0xE1;
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+
+	// NMOS CLI polls with the old I=1: one following instruction executes before a pending IRQ.
+	g.irq = true;
+	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE001 && !(g.cpu.p & 0x04));
+	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE002);
+	assert(gamateCpuStep(&g) == 7 && g.cpu.pc == 0xE100);
+
+	// NMOS SEI also polls with the old I=0: an IRQ arriving during SEI is still serviced next.
+	gamateReset(&g);
+	g.cpu.pc = 0xE010;
+	g.cpu.p &= (uint8_t) ~0x04;
+	g.cpu.irqMask = false;
+	assert(gamateCpuStep(&g) == 2 && (g.cpu.p & 0x04));
+	g.irq = true;
+	assert(gamateCpuStep(&g) == 7 && g.cpu.pc == 0xE100);
+
+	// PLP delays its restored I value in the same way as CLI/SEI.
+	gamateReset(&g);
+	g.cpu.pc = 0xE020;
+	g.cpu.s = 0xFC;
+	g.ram[0x1FD] = 0x20; // restore I clear
+	g.irq = true;
+	assert(gamateCpuStep(&g) == 4 && g.cpu.pc == 0xE021 && !(g.cpu.p & 0x04));
+	assert(gamateCpuStep(&g) == 2 && g.cpu.pc == 0xE022);
+	assert(gamateCpuStep(&g) == 7 && g.cpu.pc == 0xE100);
+
+	// RTI restores P before polling, so its new I=0 value permits immediate service at its target.
+	gamateReset(&g);
+	g.cpu.pc = 0xE030;
+	g.cpu.s = 0xFA;
+	g.ram[0x1FB] = 0x20; // P with I clear
+	g.ram[0x1FC] = 0x40; // return PC $E040
+	g.ram[0x1FD] = 0xE0;
+	g.irq = true;
+	assert(gamateCpuStep(&g) == 6 && g.cpu.pc == 0xE040 && !(g.cpu.p & 0x04));
+	assert(gamateCpuStep(&g) == 7 && g.cpu.pc == 0xE100);
 	gamateFree(&g);
 }
 
@@ -207,6 +356,8 @@ int main(void) {
 	testMemory();
 	testVideo();
 	testTimingAndState();
+	testIrq();
+	testIrqMaskTiming();
 	testCpu();
 	testAudio();
 	return 0;

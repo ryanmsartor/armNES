@@ -114,9 +114,11 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
 ### MOS Technology, MCS6500 Microcomputer Family Programming Manual
 
 - Archive: <https://archive.org/details/mos_microcomputers_programming_manual>
+- Scanned original: <https://www.bitsavers.org/components/mosTechnology/6500-50A_MCS6500pgmManJan76.pdf>
 - Status: original manufacturer programming manual.
 - Used for: official NMOS 6502 instruction semantics, addressing modes, stack behavior, interrupt
-  vectors, status flags, and documented cycle counts.
+  vectors, status flags, documented cycle counts, level-sensitive IRQ masking, and completion of the
+  current instruction before interrupt service.
 
 ### Masswerk 6502 instruction set
 
@@ -132,6 +134,17 @@ the PSG runs at 4.433 MHz / 4; channel A goes left, B right, and C to both sides
 - Used for: the deliberate NMOS behavior where decimal `ADC`/`SBC` adjust the accumulator and carry
   while N, V, and Z reflect the binary intermediate result. No Visual6502 implementation code is
   used.
+
+### Visual6502 interrupt-timing research
+
+- URL: <https://www.nesdev.org/wiki/Visual6502wiki/6502_Timing_of_Interrupt_Handling>
+- Status: transistor-level simulations and observations of the NMOS 6502 interrupt pipeline; the
+  page itself labels some collision/branch material as work in progress.
+- Used for: the established I-flag polling distinction where CLI, SEI, and PLP use the old mask for
+  the following IRQ boundary, while RTI's restored mask is effective immediately. The uncertain
+  collision and branch claims were not implemented.
+- Implementation impact: `GamateCpu` now saves an explicit IRQ-mask polling latch, state format
+  version 2 includes it, and focused tests cover pending IRQs across CLI, SEI, PLP, and RTI.
 
 ### Klaus Dormann 6502 functional tests
 
@@ -256,10 +269,28 @@ into the repository, build output, tests, or releases.
   slightly different execution instants because the diagnostic numbers frames from cartridge entry;
   normal emulation continues to preserve each real BIOS path's timing. Audio hashes for other games
   commonly differ for the same phase reason.
+- Focused IRQ tests now verify assertion at exactly 32,768 master clocks, persistence while masked,
+  service only after the current instruction boundary, IRQ-vector and stack contents, I/B/U status
+  handling, diagnostic counting, timer restart, pending-state serialization, BRK's distinct stacked
+  B flag, and reset clearing. The MOS manual supplies the NMOS 6502 service semantics; Kevtris's
+  physical Gamate notes supply the timer period and report that an IRQ or reset vector pull clears
+  the timer/flag. The CPU is instruction-granular, so it currently performs that logical vector pull
+  before advancing the seven service cycles. The exact physical clock within those cycles and
+  whether a BRK vector pull has identical timer side effects still require a Gamate trace or focused
+  hardware test; the tests explicitly preserve this distinction rather than claiming cycle accuracy.
+- The NMOS interrupt-mask audit found and corrected delayed polling across CLI, SEI, and PLP; RTI
+  applies its restored mask immediately. The full 58-cartridge/two-BIOS/300-frame matrix remained
+  116/116 after this change. This validates compatibility and the tested CPU boundary cases, but not
+  the NCR 65CX02's unmeasured interrupt-vector bus cycle.
+- LCD stop/blank boundary tests now distinguish LCDcon E from N using Kevtris's measured register
+  behavior. E freezes the internal 162-clock pass and row-event position because the physical pixel,
+  row, frame, and inversion clocks stop; clearing E resumes that position. N continues refresh while
+  emitting zero pixel data, so a plane pass completed before mid-line blanking remains accumulated.
 
 ## Still needed
 
 - CPU validation traces or tests specifically for the NCR 65CX02, especially decimal mode and the
   reported bit-manipulation instructions.
-- Direct test ROMs or logic-analyzer traces for IRQ assertion/clearing and LCD mid-frame writes.
+- Direct test ROMs or logic-analyzer traces for the within-sequence IRQ/BRK clearing clock and LCD
+  mid-frame writes.
 - Identification data for the 4-in-1 cartridge that does not depend only on a filename/database.

@@ -17,7 +17,7 @@ struct GamateCpu {
 	uint16_t pc;
 	uint8_t a, x, y, s, p;
 	uint64_t cycles;
-	bool stopped;
+	bool stopped, irqMask;
 };
 
 struct GamateDiagnostics {

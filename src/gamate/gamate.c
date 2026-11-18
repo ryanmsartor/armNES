@@ -8,7 +8,7 @@
 
 // The LCD receives 72,900 clocks per frame from the 4.433 MHz master oscillator.
 enum { CLOCKS_PER_FRAME = 72900, IRQ_PERIOD = 32768 };
-enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 1 };
+enum { STATE_MAGIC = 0x54414D47, STATE_VERSION = 2 };
 
 static uint32_t crc32(const uint8_t* data, size_t size) {
 	uint32_t crc = 0xFFFFFFFF;
@@ -434,7 +434,7 @@ void gamateRunClocks(struct Gamate* g, unsigned clocks) {
 		if (++g->irqClocks == IRQ_PERIOD) {
 			g->irq = true;
 		}
-		if (++g->lcdClock == 162) {
+		if (!g->displayStopped && ++g->lcdClock == 162) {
 			g->lcdClock = 0;
 			lcdRefreshRow(g);
 			if (++g->lcdRowEvent == GAMATE_HEIGHT * 3) g->lcdRowEvent = 0;

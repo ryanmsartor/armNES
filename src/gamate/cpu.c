@@ -104,6 +104,7 @@ static unsigned interrupt(struct Gamate* g, uint16_t vector, bool software) {
 	push(g, c->pc);
 	push(g, (c->p & ~B) | U | (software ? B : 0));
 	c->p = (c->p | I | U) & ~B;
+	c->irqMask = true;
 	c->pc = read16(g, vector);
 	// Physical tests report that an IRQ-vector pull resets the free-running timer and its flag.
 	if (vector == 0xFFFE) {
@@ -122,6 +123,7 @@ void gamateCpuReset(struct Gamate* g) {
 	c->pc = read16(g, 0xFFFC);
 	c->cycles = 7;
 	c->stopped = false;
+	c->irqMask = true;
 }
 
 static unsigned group1(struct Gamate* g, uint8_t opcode) {
@@ -203,12 +205,14 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	struct GamateCpu* c = &g->cpu;
 	g->diagnostics.instructions++;
 	if (c->stopped) return 1;
-	if (g->irq && !(c->p & I)) {
+	if (g->irq && !c->irqMask) {
 		unsigned cycles = interrupt(g, 0xFFFE, false);
 		c->cycles += cycles;
 		return cycles;
 	}
 	uint8_t opcode = fetch(g);
+	bool oldIrqMask = c->p & I;
+	bool delayedIrqMask = opcode == 0x28 || opcode == 0x58 || opcode == 0x78; // PLP, CLI, SEI
 	unsigned cycles = 2;
 	if ((opcode & 3) == 1 && opcode != 0x89) cycles = group1(g, opcode);
 	else if ((opcode & 3) == 2 && opcode != 0x8A && opcode != 0x9A && opcode != 0xAA &&
@@ -269,6 +273,7 @@ unsigned gamateCpuStep(struct Gamate* g) {
 	default: cycles = unsupported(g, opcode); break;
 	}
 	c->p |= U;
+	c->irqMask = delayedIrqMask ? oldIrqMask : (c->p & I) != 0;
 	c->cycles += cycles;
 	return cycles;
 }
