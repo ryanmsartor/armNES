@@ -56,6 +56,8 @@ struct Gamate {
 	uint8_t protectionPosition, protectionByte, protectionSequence;
 
 	uint8_t buttons, openBus;
+	uint8_t uartTx, uartRx, uartTxBits;
+	bool uartTxLine;
 	uint64_t masterClocks;
 	uint32_t frameClocks, irqClocks;
 	bool frameDone, irq;

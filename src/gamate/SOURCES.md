@@ -23,7 +23,7 @@ hardware measurements take precedence where they conflict with an emulator.
   - LCD register bit definitions, VRAM addressing, 256×256 backing bitmap, 160×150 viewport,
     200-line Y wrapping, both window modes, and the measured 72,900-crystal-clock frame.
   - AY-compatible register behavior, channel routing, and measured divider behavior.
-  - The IRQ interval of 32,768 crystal clocks and the UART register behavior.
+  - The IRQ interval of 32,768 crystal clocks and UART loading, shifting, and idle-line behavior.
 - Implementation impact: this is the principal behavioral specification for `gamate.c` and its
   tests. It caused corrections to the initial PSG read and IRQ-period implementations.
 
@@ -295,6 +295,13 @@ into the repository, build output, tests, or releases.
   value. Pixel-level tests cover these boundaries. The post-change 116-case sweep passed, and none
   of its frame-300 video/audio/PC lines changed, consistent with Kevtris's observation that known
   games may not use the special window behavior during ordinary execution.
+- The UART transmitter now follows Kevtris's measured register behavior independently of any future
+  frontend link transport. A write to `$4400-$47FF` loads the shift register and immediately exposes
+  bit 7. Every read or write at `$4C00-$4FFF` clocks one MSB-first bit; after the eighth clock the
+  data line remains low until another byte is loaded. Reset and save-state behavior are tested, and
+  state format version 3 includes an in-flight transmission. `$4800-$4BFF` still reads a zero RX
+  byte because no peer is connected. Receiver clocking, its eight-bit NMI, electrical link timing,
+  and a frontend transport are intentionally not claimed or implemented yet.
 
 ## Still needed
 

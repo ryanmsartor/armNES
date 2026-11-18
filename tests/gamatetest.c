@@ -46,6 +46,42 @@ static void testMemory(void) {
 	gamateFree(&g);
 }
 
+static void testUart(void) {
+	struct Gamate g;
+	gamateInit(&g);
+	uint8_t bios[GAMATE_BIOS_SIZE] = { 0 }, rom[0x4000] = { 0 };
+	assert(gamateLoad(&g, rom, sizeof(rom), bios, sizeof(bios)));
+	assert(gamateRead(&g, 0x4800) == 0 && !g.uartTxLine);
+
+	// TX data appears MSB-first immediately. Every read or write in $4C00-$4FFF clocks one bit;
+	// after the eighth clock the measured hardware holds the output low.
+	gamateWrite(&g, 0x4400, 0xAA);
+	assert(g.uartTxLine && g.uartTxBits == 0);
+	static const bool afterClock[8] = { false, true, false, true, false, true, false, false };
+	for (unsigned bit = 0; bit < 8; bit++) {
+		if (bit & 1) assert(gamateRead(&g, 0x4C00) == 0x4C);
+		else gamateWrite(&g, 0x4FFF, 0);
+		assert(g.uartTxBits == bit + 1 && g.uartTxLine == afterClock[bit]);
+	}
+	gamateRead(&g, 0x4C00);
+	assert(g.uartTxBits == 8 && !g.uartTxLine);
+
+	// Loading new data restarts transmission, and an in-flight byte survives state save/load.
+	gamateWrite(&g, 0x47FF, 0xC0);
+	gamateRead(&g, 0x4C00);
+	assert(g.uartTxBits == 1 && g.uartTxLine);
+	size_t stateSize = gamateStateSize(&g);
+	void* state = malloc(stateSize);
+	assert(state && gamateSaveState(&g, state, stateSize));
+	gamateWrite(&g, 0x4400, 0);
+	assert(gamateLoadState(&g, state, stateSize));
+	assert(g.uartTx == 0x80 && g.uartTxBits == 1 && g.uartTxLine);
+	free(state);
+	gamateReset(&g);
+	assert(g.uartTx == 0 && g.uartRx == 0 && g.uartTxBits == 0 && !g.uartTxLine);
+	gamateFree(&g);
+}
+
 static void testVideo(void) {
 	struct Gamate g;
 	gamateInit(&g);
@@ -414,6 +450,7 @@ static void testAudio(void) {
 
 int main(void) {
 	testMemory();
+	testUart();
 	testVideo();
 	testVideoWindows();
 	testTimingAndState();
